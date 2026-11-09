@@ -14,16 +14,432 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      app_assets: {
+        Row: {
+          amount: number
+          app_id: string | null
+          created_at: string
+          id: string
+          kind: string
+          metadata: Json
+          name: string
+          wallet_id: string
+        }
+        Insert: {
+          amount?: number
+          app_id?: string | null
+          created_at?: string
+          id?: string
+          kind?: string
+          metadata?: Json
+          name: string
+          wallet_id: string
+        }
+        Update: {
+          amount?: number
+          app_id?: string | null
+          created_at?: string
+          id?: string
+          kind?: string
+          metadata?: Json
+          name?: string
+          wallet_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "app_assets_app_id_fkey"
+            columns: ["app_id"]
+            isOneToOne: false
+            referencedRelation: "registered_apps"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "app_assets_wallet_id_fkey"
+            columns: ["wallet_id"]
+            isOneToOne: false
+            referencedRelation: "wallets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      app_connections: {
+        Row: {
+          app_id: string
+          created_at: string
+          id: string
+          revoked_at: string | null
+          wallet_id: string
+        }
+        Insert: {
+          app_id: string
+          created_at?: string
+          id?: string
+          revoked_at?: string | null
+          wallet_id: string
+        }
+        Update: {
+          app_id?: string
+          created_at?: string
+          id?: string
+          revoked_at?: string | null
+          wallet_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "app_connections_app_id_fkey"
+            columns: ["app_id"]
+            isOneToOne: false
+            referencedRelation: "registered_apps"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "app_connections_wallet_id_fkey"
+            columns: ["wallet_id"]
+            isOneToOne: false
+            referencedRelation: "wallets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      audit_logs: {
+        Row: {
+          action: string
+          app_id: string | null
+          created_at: string
+          details: Json
+          id: string
+          ip: string | null
+          method: string | null
+          wallet_id: string | null
+        }
+        Insert: {
+          action: string
+          app_id?: string | null
+          created_at?: string
+          details?: Json
+          id?: string
+          ip?: string | null
+          method?: string | null
+          wallet_id?: string | null
+        }
+        Update: {
+          action?: string
+          app_id?: string | null
+          created_at?: string
+          details?: Json
+          id?: string
+          ip?: string | null
+          method?: string | null
+          wallet_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "audit_logs_app_id_fkey"
+            columns: ["app_id"]
+            isOneToOne: false
+            referencedRelation: "registered_apps"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "audit_logs_wallet_id_fkey"
+            columns: ["wallet_id"]
+            isOneToOne: false
+            referencedRelation: "wallets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      auth_codes: {
+        Row: {
+          app_id: string
+          code_challenge: string | null
+          code_hash: string
+          created_at: string
+          expires_at: string
+          id: string
+          used_at: string | null
+          wallet_id: string
+        }
+        Insert: {
+          app_id: string
+          code_challenge?: string | null
+          code_hash: string
+          created_at?: string
+          expires_at: string
+          id?: string
+          used_at?: string | null
+          wallet_id: string
+        }
+        Update: {
+          app_id?: string
+          code_challenge?: string | null
+          code_hash?: string
+          created_at?: string
+          expires_at?: string
+          id?: string
+          used_at?: string | null
+          wallet_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "auth_codes_app_id_fkey"
+            columns: ["app_id"]
+            isOneToOne: false
+            referencedRelation: "registered_apps"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "auth_codes_wallet_id_fkey"
+            columns: ["wallet_id"]
+            isOneToOne: false
+            referencedRelation: "wallets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      rate_limits: {
+        Row: {
+          count: number
+          key: string
+          window_start: string
+        }
+        Insert: {
+          count?: number
+          key: string
+          window_start?: string
+        }
+        Update: {
+          count?: number
+          key?: string
+          window_start?: string
+        }
+        Relationships: []
+      }
+      registered_apps: {
+        Row: {
+          allowed_origins: string[]
+          api_enabled: boolean
+          created_at: string
+          id: string
+          key_hash: string
+          key_prefix: string
+          name: string
+          popup_enabled: boolean
+          revoked_at: string | null
+          trusted_oauth: boolean
+        }
+        Insert: {
+          allowed_origins?: string[]
+          api_enabled?: boolean
+          created_at?: string
+          id?: string
+          key_hash: string
+          key_prefix: string
+          name: string
+          popup_enabled?: boolean
+          revoked_at?: string | null
+          trusted_oauth?: boolean
+        }
+        Update: {
+          allowed_origins?: string[]
+          api_enabled?: boolean
+          created_at?: string
+          id?: string
+          key_hash?: string
+          key_prefix?: string
+          name?: string
+          popup_enabled?: boolean
+          revoked_at?: string | null
+          trusted_oauth?: boolean
+        }
+        Relationships: []
+      }
+      user_roles: {
+        Row: {
+          id: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Insert: {
+          id?: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Update: {
+          id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          user_id?: string
+        }
+        Relationships: []
+      }
+      wallet_sessions: {
+        Row: {
+          app_id: string | null
+          created_at: string
+          expires_at: string
+          id: string
+          ip: string | null
+          revoked_at: string | null
+          token_hash: string
+          user_agent: string | null
+          wallet_id: string
+        }
+        Insert: {
+          app_id?: string | null
+          created_at?: string
+          expires_at: string
+          id?: string
+          ip?: string | null
+          revoked_at?: string | null
+          token_hash: string
+          user_agent?: string | null
+          wallet_id: string
+        }
+        Update: {
+          app_id?: string | null
+          created_at?: string
+          expires_at?: string
+          id?: string
+          ip?: string | null
+          revoked_at?: string | null
+          token_hash?: string
+          user_agent?: string | null
+          wallet_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "wallet_sessions_app_id_fkey"
+            columns: ["app_id"]
+            isOneToOne: false
+            referencedRelation: "registered_apps"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "wallet_sessions_wallet_id_fkey"
+            columns: ["wallet_id"]
+            isOneToOne: false
+            referencedRelation: "wallets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      wallet_verifications: {
+        Row: {
+          app_id: string | null
+          attempts: number
+          code_hash: string
+          consumed_at: string | null
+          created_at: string
+          expires_at: string
+          id: string
+          last_sent_at: string
+          wallet_id: string
+        }
+        Insert: {
+          app_id?: string | null
+          attempts?: number
+          code_hash: string
+          consumed_at?: string | null
+          created_at?: string
+          expires_at: string
+          id?: string
+          last_sent_at?: string
+          wallet_id: string
+        }
+        Update: {
+          app_id?: string | null
+          attempts?: number
+          code_hash?: string
+          consumed_at?: string | null
+          created_at?: string
+          expires_at?: string
+          id?: string
+          last_sent_at?: string
+          wallet_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "wallet_verifications_app_id_fkey"
+            columns: ["app_id"]
+            isOneToOne: false
+            referencedRelation: "registered_apps"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "wallet_verifications_wallet_id_fkey"
+            columns: ["wallet_id"]
+            isOneToOne: false
+            referencedRelation: "wallets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      wallets: {
+        Row: {
+          address: string
+          class_hash: string
+          created_at: string
+          created_by_app: string | null
+          deployed: boolean
+          email: string
+          encrypted_private_key: string
+          id: string
+          network: string
+          public_key: string
+          updated_at: string
+          user_id: string | null
+          verified: boolean
+          verified_method: string | null
+        }
+        Insert: {
+          address: string
+          class_hash: string
+          created_at?: string
+          created_by_app?: string | null
+          deployed?: boolean
+          email: string
+          encrypted_private_key: string
+          id?: string
+          network?: string
+          public_key: string
+          updated_at?: string
+          user_id?: string | null
+          verified?: boolean
+          verified_method?: string | null
+        }
+        Update: {
+          address?: string
+          class_hash?: string
+          created_at?: string
+          created_by_app?: string | null
+          deployed?: boolean
+          email?: string
+          encrypted_private_key?: string
+          id?: string
+          network?: string
+          public_key?: string
+          updated_at?: string
+          user_id?: string | null
+          verified?: boolean
+          verified_method?: string | null
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      has_role: {
+        Args: {
+          _role: Database["public"]["Enums"]["app_role"]
+          _user_id: string
+        }
+        Returns: boolean
+      }
     }
     Enums: {
-      [_ in never]: never
+      app_role: "admin" | "user"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -150,6 +566,8 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      app_role: ["admin", "user"],
+    },
   },
 } as const
