@@ -28,3 +28,10 @@ use the editor.
   own key and store it in Secrets.
 - **Secrets.** Lovable manages them. Do not put secret values in the repo.
 <!-- LOVABLE:END -->
+
+## Project rules
+- Wallet logic lives in `src/lib/wallet/`; DB-touching code is `service.server.ts`, loaded only via dynamic import inside handlers, so the service-role client never reaches the browser.
+- Pure rules (OTP limits, session validity, origin matching) live in `rules.ts` so they can be unit-tested without a database.
+- Starknet accounts must use the SNIP-9 class hash in `starknet.ts` with derivation calldata=[publicKey], salt=publicKey; the legacy OZ v0.8.1 class is rejected by paymasters.
+- Partner HTTP API lives under `src/routes/api/public/v1/` and goes through `handle()` in `http.ts` (X-App-Key + registered-origin check); session tokens, app keys and codes are stored only as SHA-256 hashes.
+- Popup sign-in uses an auth code + PKCE exchanged at `/api/public/v1/oauth/token`; replies use postMessage only to the requested origin, which must be registered.
