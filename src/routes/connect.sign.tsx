@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { SignInCard } from "@/components/SignInCard";
 import { useAuth } from "@/hooks/use-auth";
 import { approveSign } from "@/lib/wallet/portal.functions";
-import { Shell, reply, usePartnerApp } from "./connect";
+import { Shell, reply, usePartnerApp } from "@/components/connect-shared";
 
 export const Route = createFileRoute("/connect/sign")({
   head: () => ({

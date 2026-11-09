@@ -1,11 +1,12 @@
 import { createFileRoute, Outlet, useMatchRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { Button } from "@/components/ui/button";
 import { SignInCard } from "@/components/SignInCard";
 import { useAuth } from "@/hooks/use-auth";
 import { supabase } from "@/integrations/supabase/client";
-import { approveConnect, getAppPublic } from "@/lib/wallet/portal.functions";
+import { approveConnect } from "@/lib/wallet/portal.functions";
+import { Shell, reply, usePartnerApp } from "@/components/connect-shared";
 
 type Search = { app?: string; origin?: string; challenge?: string };
 
@@ -29,20 +30,6 @@ export const Route = createFileRoute("/connect")({
 function ConnectLayout() {
   const isSign = useMatchRoute()({ to: "/connect/sign" });
   return isSign ? <Outlet /> : <Connect />;
-}
-
-export function usePartnerApp(appId?: string) {
-  const fetchApp = useServerFn(getAppPublic);
-  const [app, setApp] = useState<{ id: string; name: string; popup_enabled: boolean } | null | undefined>(undefined);
-  useEffect(() => {
-    if (!appId) return setApp(null);
-    fetchApp({ data: { appId } }).then(setApp).catch(() => setApp(null));
-  }, [appId]);
-  return app;
-}
-
-export function reply(origin: string, msg: Record<string, unknown>) {
-  window.opener?.postMessage({ source: "loop-wallet", ...msg }, origin);
 }
 
 function Connect() {
@@ -97,6 +84,3 @@ function Connect() {
   );
 }
 
-export function Shell({ children }: { children: React.ReactNode }) {
-  return <main className="grid min-h-screen place-items-center px-4 py-8">{children}</main>;
-}
