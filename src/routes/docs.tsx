@@ -23,6 +23,9 @@ const popup = `<script src="HUB_URL/sdk/loop-wallet.js"></script>
   signButton.onclick = async () => {
     const { signature, message_hash } = await lw.signTypedData(typedData); // SNIP-12
   };
+  sendButton.onclick = async () => {
+    const { transaction_hash } = await lw.execute([{ contractAddress, entrypoint, calldata }]); // gas-free
+  };
 </script>`;
 
 const api = `POST /api/public/v1/wallet/get-or-create   { email }
@@ -30,6 +33,7 @@ POST /api/public/v1/wallet/verify-otp      { email, code }
 POST /api/public/v1/wallet/resend-otp      { email }
 GET  /api/public/v1/wallet/:address/assets
 POST /api/public/v1/wallet/sign            { session_token, typed_data }
+POST /api/public/v1/wallet/execute         { session_token, calls: [{ contractAddress, entrypoint, calldata }] }
 Header on every call: X-App-Key: lwk_...`;
 
 function Docs() {

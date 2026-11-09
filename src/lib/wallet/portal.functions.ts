@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { getRequest } from "@tanstack/react-start/server";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { callsSchema } from "./calls-schema";
 
 function ip() {
   const r = getRequest();
@@ -99,6 +100,22 @@ export const approveSign = createServerFn({ method: "POST" })
     return svc.signWithWallet(wallet.id, app.id, data.typedData, ip());
   });
 
+export const approveExecute = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: { appId: string; origin: string; calls: unknown }) =>
+    z.object({ appId: z.string().uuid(), origin: z.string().url().max(300), calls: callsSchema }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { svc, wallet } = await ownerWallet(context.claims as never, context.userId);
+    const app = await svc.appById(data.appId);
+    await svc.requireConnection(wallet.id, app, data.origin);
+    try {
+      return await svc.executeForWallet(wallet.id, app.id, data.calls, ip());
+    } catch (e) {
+      throw new Error(e instanceof svc.ApiError ? "Gas sponsorship failed, nothing was spent. Try again later." : (e as Error).message);
+    }
+  });
+
 // ---------- admin ----------
 export const adminOverview = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -106,14 +123,16 @@ export const adminOverview = createServerFn({ method: "POST" })
     await assertAdmin(context.supabase as never, context.userId);
     const sb = context.supabase;
     const since = new Date(Date.now() - 7 * 864e5).toISOString();
-    const [total, verified, takeovers, signs, apps] = await Promise.all([
+    const [total, verified, takeovers, signs, apps, txs] = await Promise.all([
       sb.from("wallets").select("id", { count: "exact", head: true }),
       sb.from("wallets").select("id", { count: "exact", head: true }).eq("verified", true),
       sb.from("audit_logs").select("id,created_at,method,ip,wallet_id,wallets(email,address)").eq("action", "reclaimed_by_owner").order("created_at", { ascending: false }).limit(10),
       sb.from("audit_logs").select("id", { count: "exact", head: true }).eq("action", "signed_typed_data").gte("created_at", since),
       sb.from("registered_apps").select("id,name,key_prefix,allowed_origins,popup_enabled,api_enabled,trusted_oauth,sandbox,revoked_at,created_at").order("created_at", { ascending: false }),
+      sb.from("audit_logs").select("id", { count: "exact", head: true }).eq("action", "executed_transaction").gte("created_at", since),
     ]);
     return {
+      txsLast7d: txs.count ?? 0,
       totalWallets: total.count ?? 0,
       verifiedWallets: verified.count ?? 0,
       signsLast7d: signs.count ?? 0,

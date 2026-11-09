@@ -42,11 +42,12 @@ function Admin() {
   const pct = d.totalWallets ? Math.round((d.verifiedWallets / d.totalWallets) * 100) : 0;
   return (
     <main className="mx-auto max-w-6xl space-y-6 px-4 py-8">
-      <div className="grid gap-4 sm:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-5">
         <Stat label="Total wallets" value={d.totalWallets} />
         <Stat label="Verified" value={`${pct}%`} />
         <Stat label="Recent takeovers" value={d.takeovers.length} />
         <Stat label="Signatures (7 days)" value={d.signsLast7d} />
+        <Stat label="Transactions (7 days)" value={d.txsLast7d} />
       </div>
       <Apps apps={d.apps} />
       <Search />
@@ -153,7 +154,7 @@ function Search() {
           <div className="mt-3 max-h-80 divide-y overflow-auto">
             {res.logs.map((l) => (
               <div key={l.id} className="flex justify-between py-1.5 text-xs">
-                <span>{l.action}{l.method ? ` · ${l.method}` : ""}{(l.registered_apps as { name: string } | null) ? ` · ${(l.registered_apps as { name: string }).name}` : ""}</span>
+                <span>{l.action}{(l.details as { tx_hash?: string } | null)?.tx_hash && (<> · <a className="text-primary underline" target="_blank" rel="noreferrer" href={`https://sepolia.voyager.online/tx/${(l.details as { tx_hash: string }).tx_hash}`}>view tx</a></>)}{l.method ? ` · ${l.method}` : ""}{(l.registered_apps as { name: string } | null) ? ` · ${(l.registered_apps as { name: string }).name}` : ""}</span>
                 <span className="text-muted-foreground">{l.ip ?? "—"} · {new Date(l.created_at).toLocaleString()}</span>
               </div>
             ))}

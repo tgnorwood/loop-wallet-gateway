@@ -17,6 +17,7 @@ import { Route as DocsRouteImport } from './routes/docs'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as ConnectSignRouteImport } from './routes/connect.sign'
 import { Route as ApiPublicV1OauthTokenRouteImport } from './routes/api/public/v1/oauth/token'
+import { Route as ApiPublicV1WalletExecuteRouteImport } from './routes/api/public/v1/wallet/execute'
 import { Route as ApiPublicV1WalletGetOrCreateRouteImport } from './routes/api/public/v1/wallet/get-or-create'
 import { Route as ApiPublicV1WalletResendOtpRouteImport } from './routes/api/public/v1/wallet/resend-otp'
 import { Route as ApiPublicV1WalletSignRouteImport } from './routes/api/public/v1/wallet/sign'
@@ -63,6 +64,12 @@ const ApiPublicV1OauthTokenRoute = ApiPublicV1OauthTokenRouteImport.update({
   path: '/api/public/v1/oauth/token',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiPublicV1WalletExecuteRoute =
+  ApiPublicV1WalletExecuteRouteImport.update({
+    id: '/api/public/v1/wallet/execute',
+    path: '/api/public/v1/wallet/execute',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiPublicV1WalletGetOrCreateRoute =
   ApiPublicV1WalletGetOrCreateRouteImport.update({
     id: '/api/public/v1/wallet/get-or-create',
@@ -102,6 +109,7 @@ export interface FileRoutesByFullPath {
   '/reset-password': typeof ResetPasswordRoute
   '/connect/sign': typeof ConnectSignRoute
   '/api/public/v1/oauth/token': typeof ApiPublicV1OauthTokenRoute
+  '/api/public/v1/wallet/execute': typeof ApiPublicV1WalletExecuteRoute
   '/api/public/v1/wallet/get-or-create': typeof ApiPublicV1WalletGetOrCreateRoute
   '/api/public/v1/wallet/resend-otp': typeof ApiPublicV1WalletResendOtpRoute
   '/api/public/v1/wallet/sign': typeof ApiPublicV1WalletSignRoute
@@ -117,6 +125,7 @@ export interface FileRoutesByTo {
   '/reset-password': typeof ResetPasswordRoute
   '/connect/sign': typeof ConnectSignRoute
   '/api/public/v1/oauth/token': typeof ApiPublicV1OauthTokenRoute
+  '/api/public/v1/wallet/execute': typeof ApiPublicV1WalletExecuteRoute
   '/api/public/v1/wallet/get-or-create': typeof ApiPublicV1WalletGetOrCreateRoute
   '/api/public/v1/wallet/resend-otp': typeof ApiPublicV1WalletResendOtpRoute
   '/api/public/v1/wallet/sign': typeof ApiPublicV1WalletSignRoute
@@ -133,6 +142,7 @@ export interface FileRoutesById {
   '/reset-password': typeof ResetPasswordRoute
   '/connect/sign': typeof ConnectSignRoute
   '/api/public/v1/oauth/token': typeof ApiPublicV1OauthTokenRoute
+  '/api/public/v1/wallet/execute': typeof ApiPublicV1WalletExecuteRoute
   '/api/public/v1/wallet/get-or-create': typeof ApiPublicV1WalletGetOrCreateRoute
   '/api/public/v1/wallet/resend-otp': typeof ApiPublicV1WalletResendOtpRoute
   '/api/public/v1/wallet/sign': typeof ApiPublicV1WalletSignRoute
@@ -150,6 +160,7 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/connect/sign'
     | '/api/public/v1/oauth/token'
+    | '/api/public/v1/wallet/execute'
     | '/api/public/v1/wallet/get-or-create'
     | '/api/public/v1/wallet/resend-otp'
     | '/api/public/v1/wallet/sign'
@@ -165,6 +176,7 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/connect/sign'
     | '/api/public/v1/oauth/token'
+    | '/api/public/v1/wallet/execute'
     | '/api/public/v1/wallet/get-or-create'
     | '/api/public/v1/wallet/resend-otp'
     | '/api/public/v1/wallet/sign'
@@ -180,6 +192,7 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/connect/sign'
     | '/api/public/v1/oauth/token'
+    | '/api/public/v1/wallet/execute'
     | '/api/public/v1/wallet/get-or-create'
     | '/api/public/v1/wallet/resend-otp'
     | '/api/public/v1/wallet/sign'
@@ -195,6 +208,7 @@ export interface RootRouteChildren {
   DocsRoute: typeof DocsRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
   ApiPublicV1OauthTokenRoute: typeof ApiPublicV1OauthTokenRoute
+  ApiPublicV1WalletExecuteRoute: typeof ApiPublicV1WalletExecuteRoute
   ApiPublicV1WalletGetOrCreateRoute: typeof ApiPublicV1WalletGetOrCreateRoute
   ApiPublicV1WalletResendOtpRoute: typeof ApiPublicV1WalletResendOtpRoute
   ApiPublicV1WalletSignRoute: typeof ApiPublicV1WalletSignRoute
@@ -260,6 +274,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicV1OauthTokenRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/v1/wallet/execute': {
+      id: '/api/public/v1/wallet/execute'
+      path: '/api/public/v1/wallet/execute'
+      fullPath: '/api/public/v1/wallet/execute'
+      preLoaderRoute: typeof ApiPublicV1WalletExecuteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/v1/wallet/get-or-create': {
       id: '/api/public/v1/wallet/get-or-create'
       path: '/api/public/v1/wallet/get-or-create'
@@ -317,6 +338,7 @@ const rootRouteChildren: RootRouteChildren = {
   DocsRoute: DocsRoute,
   ResetPasswordRoute: ResetPasswordRoute,
   ApiPublicV1OauthTokenRoute: ApiPublicV1OauthTokenRoute,
+  ApiPublicV1WalletExecuteRoute: ApiPublicV1WalletExecuteRoute,
   ApiPublicV1WalletGetOrCreateRoute: ApiPublicV1WalletGetOrCreateRoute,
   ApiPublicV1WalletResendOtpRoute: ApiPublicV1WalletResendOtpRoute,
   ApiPublicV1WalletSignRoute: ApiPublicV1WalletSignRoute,
