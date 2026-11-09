@@ -222,7 +222,13 @@ async function finalize(t: TxRow, events: { from_address: string; keys: string[]
     case "nft.update": {
       const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
       if (t.request["tokenUri"]) patch["token_uri"] = t.request["tokenUri"];
-      if (t.request["attributes"]) patch["attributes"] = t.request["attributes"];
+      if (t.request["attributes"]) {
+        // set_attributes upserts by key on chain, so merge rather than replace.
+        const { data: cur } = await db.from("nfts").select("attributes").eq("collection_id", r["collectionId"]!).eq("token_id", r["tokenId"]!).maybeSingle();
+        const merged = new Map(((cur?.attributes ?? []) as { key: string; value: unknown }[]).map((a) => [a.key, a]));
+        for (const a of t.request["attributes"] as { key: string; value: unknown }[]) merged.set(a.key, a);
+        patch["attributes"] = [...merged.values()];
+      }
       if (t.request["media"]) patch["media"] = t.request["media"];
       await db.from("nfts").update(patch as never).eq("collection_id", r["collectionId"]!).eq("token_id", r["tokenId"]!);
       break;
