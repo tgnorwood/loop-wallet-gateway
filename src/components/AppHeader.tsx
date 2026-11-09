@@ -15,6 +15,7 @@ export function AppHeader() {
           <Link to="/" activeOptions={{ exact: true }} activeProps={{ className: "text-foreground" }}>Portal</Link>
           <Link to="/demo" activeProps={{ className: "text-foreground" }}>Sandbox</Link>
           <Link to="/admin" activeProps={{ className: "text-foreground" }}>Admin</Link>
+          <Link to="/dashboard" activeProps={{ className: "text-foreground" }}>Dashboard</Link>
           <Link to="/docs" activeProps={{ className: "text-foreground" }}>Docs</Link>
         </nav>
         {user && (
