@@ -21,7 +21,7 @@ export function randomToken(prefix: string, bytes = 32) {
 }
 
 export function randomOtp() {
-  const n = crypto.getRandomValues(new Uint32Array(1))[0] % 1_000_000;
+  const n = crypto.getRandomValues(new Uint32Array(1))[0]! % 1_000_000;
   return n.toString().padStart(6, "0");
 }
 
@@ -38,7 +38,7 @@ export async function encryptSecret(plain: string, secret: string) {
 
 export async function decryptSecret(blob: string, secret: string) {
   const [v, iv, ct] = blob.split(":");
-  if (v !== "v1") throw new Error("Unknown key format");
+  if (v !== "v1" || !iv || !ct) throw new Error("Unknown key format");
   const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv: unb64(iv) }, await aesKey(secret), unb64(ct));
   return new TextDecoder().decode(pt);
 }

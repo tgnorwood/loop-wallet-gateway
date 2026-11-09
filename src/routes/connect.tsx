@@ -12,9 +12,9 @@ type Search = { app?: string; origin?: string; challenge?: string };
 
 export const Route = createFileRoute("/connect")({
   validateSearch: (s: Record<string, unknown>): Search => ({
-    app: typeof s.app === "string" ? s.app : undefined,
-    origin: typeof s.origin === "string" ? s.origin : undefined,
-    challenge: typeof s.challenge === "string" ? s.challenge : undefined,
+    ...(typeof s["app"] === "string" ? { app: s["app"] } : {}),
+    ...(typeof s["origin"] === "string" ? { origin: s["origin"] } : {}),
+    ...(typeof s["challenge"] === "string" ? { challenge: s["challenge"] } : {}),
   }),
   head: () => ({
     meta: [

@@ -79,7 +79,7 @@ export async function appById(id: string): Promise<App> {
   return data as App;
 }
 
-export async function createApp(input: { name: string; allowed_origins: string[]; sandbox?: boolean; trusted_oauth?: boolean }) {
+export async function createApp(input: { name: string; allowed_origins: string[]; sandbox?: boolean | undefined; trusted_oauth?: boolean | undefined }) {
   const raw = randomToken("lwk_", 24);
   const { data, error } = await db
     .from("registered_apps")
@@ -152,7 +152,7 @@ async function sendOtp(wallet: { id: string; email: string }, app: App, ip: stri
   return app.sandbox ? { debug_code: code } : {};
 }
 
-export async function getOrCreate(app: App, input: { email: string; oauth_verified?: boolean }, ip: string | null, ua: string | null) {
+export async function getOrCreate(app: App, input: { email: string; oauth_verified?: boolean | undefined }, ip: string | null, ua: string | null) {
   if (!app.api_enabled) throw new ApiError(403, "api_disabled");
   const email = input.email.trim().toLowerCase();
   await rateLimit(`goc:${app.id}:${ip}`, 30, 60_000);

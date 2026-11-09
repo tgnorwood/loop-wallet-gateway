@@ -55,7 +55,7 @@ function Dashboard() {
 
   if (isLoading) return <p className="p-8 text-muted-foreground">Loading your wallet…</p>;
   if (error || !data) return <p className="p-8 text-destructive">Couldn't load your wallet: {String((error as Error)?.message)}</p>;
-  const strk = Number(BigInt(data.assets.balances[0].raw) / 10n ** 14n) / 10000;
+  const strk = Number(BigInt(data.assets.balances[0]?.raw ?? "0") / 10n ** 14n) / 10000;
 
   return (
     <main className="mx-auto max-w-6xl space-y-6 px-4 py-8">

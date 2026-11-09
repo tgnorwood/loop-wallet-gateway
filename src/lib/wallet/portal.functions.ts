@@ -156,10 +156,11 @@ export const adminUpdateApp = createServerFn({ method: "POST" })
     await assertAdmin(context.supabase as never, context.userId);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { id, revoke, allowed_origins, ...rest } = data;
+    const flags = Object.fromEntries(Object.entries(rest).filter(([, v]) => v !== undefined)) as { popup_enabled?: boolean; api_enabled?: boolean; trusted_oauth?: boolean };
     await supabaseAdmin
       .from("registered_apps")
       .update({
-        ...rest,
+        ...flags,
         ...(allowed_origins ? { allowed_origins: allowed_origins.map((o) => new URL(o).origin) } : {}),
         ...(revoke ? { revoked_at: new Date().toISOString() } : {}),
       })

@@ -42,10 +42,10 @@ function Demo() {
   const push = (label: string, body: unknown) => setLog((l) => [{ label, body }, ...l]);
 
   async function run(action: "get-or-create" | "verify-otp" | "resend-otp" | "sign") {
-    const r = (await call({ data: { action, email, code: code || undefined, token: token ?? undefined } })) as Record<string, unknown>;
+    const r = (await call({ data: { action, email, ...(code ? { code } : {}), ...(token ? { token } : {}) } })) as Record<string, unknown>;
     push(`POST /v1/wallet/${action}`, r);
-    if (r.session_token) { setToken(String(r.session_token)); setStep("done"); }
-    if (r.status === "requires_verification") setStep("code");
+    if (r["session_token"]) { setToken(String(r["session_token"])); setStep("done"); }
+    if (r["status"] === "requires_verification") setStep("code");
   }
 
   return (
