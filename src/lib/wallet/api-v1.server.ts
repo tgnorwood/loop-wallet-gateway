@@ -5,7 +5,7 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { appFromKey, audit, rateLimit, ApiError } from "./service.server";
 import { EngineError, enqueue, getTx, tick, txDto, waitForTx, type TxRow } from "./engine.server";
 import { encryptSecret } from "./crypto";
-import { generateWallet, isValidAddress } from "./starknet";
+import { generateWallet } from "./starknet";
 import { canRemoveMinter, capExceeded, fromBaseUnits, kindAllowed, sameAddress, signerKeyOperator, signerKeyWallet, toBaseUnits } from "./chain-rules";
 
 const db = supabaseAdmin;
@@ -358,4 +358,3 @@ export async function dispatchV1(request: Request, path: string): Promise<Respon
   }
 }
 
-export { isValidAddress };
