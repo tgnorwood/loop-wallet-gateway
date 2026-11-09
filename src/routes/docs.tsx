@@ -36,6 +36,27 @@ POST /api/public/v1/wallet/sign            { session_token, typed_data }
 POST /api/public/v1/wallet/execute         { session_token, calls: [{ contractAddress, entrypoint, calldata }] }
 Header on every call: X-App-Key: lwk_...`;
 
+const v1 = `Base: /api/public/v1   Headers: Authorization: Bearer lwk_...   Idempotency-Key: <uuid> (all writes)
+Amounts are decimal strings ("12.5"). Errors: { error: { code, message, details } }
+
+POST /wallets                 { externalId, kind?: user|collection_owner|treasury, label?, email? }
+GET  /wallets?externalId=…  · /wallets/:id · /wallets/:id/balances · /wallets/:id/nfts
+POST /tokens                  { name, symbol, initialSupply, swappable? }
+POST /tokens/:id/mint         { amount }
+POST /tokens/:id/distribute   { toWalletId | toAddress, amount }
+POST /transfers               { fromWalletId, toWalletId | toAddress, tokenId, amount }
+POST /returns                 { walletId, tokenId, amount }
+POST /swaps                   { walletId, fromTokenId, toTokenId, amount }
+POST /collections             { name, symbol, ownerWalletId, royaltyReceiver?, royaltyBps? }
+PATCH /collections/:id/royalties  { receiver, bps }
+POST /collections/:id/freeze      { confirm: true }   (permanent)
+POST /collections/:id/minters     { address }   DELETE /collections/:id/minters/:address
+POST /collections/:id/nfts        { toWalletId | toAddress, tokenUri, attributes?, media? }
+GET|PATCH /collections/:id/nfts/:tokenId   { tokenUri?, attributes?, media? }
+POST /collections/:id/nfts/:tokenId/freeze { confirm: true }
+POST /nft-transfers           { collectionId, tokenId, fromWalletId, toWalletId | toAddress }
+GET  /transactions/:id · /transactions?status=&type=&walletId= · POST /transactions/:id/cancel`;
+
 function Docs() {
   const [hub, setHub] = useState("https://YOUR-HUB");
   useEffect(() => setHub(window.location.origin), []);
@@ -55,6 +76,14 @@ function Docs() {
           <h2 className="text-xl font-semibold">2. Partner API (server to server)</h2>
           <pre className="mt-3 overflow-auto rounded-lg border bg-card p-4 font-mono text-xs">{api}</pre>
           <p className="mt-2 text-sm text-muted-foreground">Keep your app key on your server. Browser calls are only accepted from your registered websites.</p>
+        </section>
+        <section>
+          <h2 className="text-xl font-semibold">3. Tokens & NFTs API (Loop Do, Loop Fans, PressChain)</h2>
+          <pre className="mt-3 overflow-auto rounded-lg border bg-card p-4 font-mono text-xs">{v1}</pre>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Writes return 202 with a transaction (queued → submitted → confirmed/failed). Add ?wait=true to wait up to 45 s.
+            Set a webhook address on the Dashboard to get signed transaction.confirmed / transaction.failed events (X-Signature: sha256=HMAC).
+          </p>
         </section>
         <section>
           <h2 className="text-xl font-semibold">Wallets</h2>
