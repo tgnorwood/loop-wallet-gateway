@@ -207,7 +207,7 @@ function Import({ apps, loopDoReady }: { apps: AppRow[]; loopDoReady: boolean })
   const [rows, setRows] = useState<{ externalId: string; status: string; address?: string; note?: string }[]>([]);
   const [busy, setBusy] = useState(false);
   const help = {
-    "loop-do-wallets": "Columns: user_id,salt,address,email — from Loop Do's wallet tables. Keeps the same addresses so balances stay.",
+    "loop-do-wallets": "Columns: user_id,address,private_key,email — exported from Loop Do. Each key is checked against its address before import, so balances stay. Delete the export file afterwards.",
     "new-wallets": "Columns: external_id,email,kind — e.g. Loop Fans fans. Each gets a new wallet.",
     tokens: "Columns: address,name,symbol,swappable — existing Loop Do tokens to manage from here.",
   }[mode];
@@ -230,7 +230,7 @@ function Import({ apps, loopDoReady }: { apps: AppRow[]; loopDoReady: boolean })
         </select>
       </div>
       <p className="text-sm text-muted-foreground">{help}</p>
-      {mode === "loop-do-wallets" && !loopDoReady && <p className="text-sm text-destructive">Loop Do's wallet secret hasn't been added yet, so this import can't run.</p>}
+      {mode === "loop-do-wallets" && !loopDoReady && null}
       <Textarea rows={8} value={csv} onChange={(e) => setCsv(e.target.value)} placeholder="Paste CSV here, first line = column names" className="font-mono text-xs" />
       <div className="flex gap-2">
         <Button variant="outline" disabled={busy || !appId || !csv} onClick={() => go(true)}>Preview</Button>
