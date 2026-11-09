@@ -19,7 +19,7 @@ Build the hub described in your brief as a new app. The uploaded `cloud_wallet` 
 ## Technical details
 
 - Lovable Cloud: tables `wallets`, `wallet_sessions`, `wallet_verifications`, `registered_apps`, `audit_logs`, `user_roles` (admin). RLS on all; partner tables only reachable by server code. Grants per table.
-- Keys: `viem` generates EVM keys; encrypted with AES-256-GCM via Web Crypto using a generated `WALLET_ENCRYPTION_KEY` secret. Session tokens and app keys stored as SHA-256 hashes; raw value shown once.
+- Keys: starknet.js generates Stark keys (EVM/viem parts of the brief are replaced by Starknet); encrypted with AES-256-GCM via Web Crypto using a generated `WALLET_ENCRYPTION_KEY` secret. Session tokens and app keys stored as SHA-256 hashes; raw value shown once.
 - OAuth "verified: true" from a partner is only trusted from apps flagged as trusted for OAuth in admin; the portal itself uses Lovable's Google sign-in.
 - OTP email via Lovable's built-in email (needs an email sender domain set up).
 - Assets endpoint reads native balance + recent transfers from a public EVM RPC (default: Polygon; configurable), plus points/badges stored in an `app_assets` table apps can write to later.
@@ -27,8 +27,20 @@ Build the hub described in your brief as a new app. The uploaded `cloud_wallet` 
 - Rate limits stored in the database (workers are stateless).
 - Tests for: OTP expiry/attempt limits, resend cooldown, takeover revoking sessions, revoked token rejected by `sign`.
 
+## Starknet and sign-in changes
+
+- Wallets are Starknet accounts (starknet.js, OpenZeppelin account class). Address is computed up front, so users get one instantly; the account contract is deployed on its first signed transaction. Deploy fees are paid by a hub "fee wallet" (paymaster-style) that you fund with STRK; the fee wallet key is stored as a secret.
+- Balances/transfers come from a Starknet RPC (Sepolia testnet first, mainnet when you're ready). Signing uses Starknet typed data (SNIP-12) and invoke transactions instead of EVM.
+- Portal sign-in: email + password and Google only (no Apple for now). Password reset page included.
+- Partner API keeps the 6-digit email code for the "existing email" gate, since partner apps don't hold passwords.
+
+## Security summary
+
+Strong points: private keys encrypted with AES-256-GCM and only decrypted inside the server when signing; never sent to browsers or partner apps. Tokens and app keys stored hashed, so a leaked database doesn't give working sessions. Code attempts, resend cooldowns, and session revocation stop brute-force and imposter takeovers. Every create/verify/sign is audit-logged.
+
+Honest limits: this is a custodial wallet, so whoever controls the server and the encryption secret can, in principle, sign for any user. A stolen session token can sign until it expires or is revoked (short expiry and per-app scoping reduce that). The new-user "zero friction" step means someone can create a wallet with another person's email; they never get the key, and the real owner reclaims it, but anything sent to that wallet in between is controlled by the hub. For large balances you'd later want a hardware-backed key service (KMS/HSM) or user-held recovery, plus an external security audit before mainnet.
+
 ## Defaults I'm assuming (tell me to change)
 
-- Chain: Polygon mainnet for balances.
+- Network: Starknet Sepolia testnet first.
 - First admin: your account once you sign in.
-- Apple sign-in included alongside Google.
