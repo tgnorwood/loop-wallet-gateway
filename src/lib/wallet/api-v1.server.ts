@@ -80,7 +80,15 @@ async function capCheck(ctx: Ctx, types: string[], requestRaw: bigint, cap: numb
 
 async function queue(ctx: Ctx, type: string, signerKey: string, walletId: string | null, request: Record<string, unknown>, resolved: Record<string, unknown>) {
   if (!ctx.idem) throw new EngineError(400, "VALIDATION", "Idempotency-Key header is required");
-  const { tx, replay } = await enqueue({ appId: ctx.app.id, network: ctx.network, type, idempotencyKey: ctx.idem, signerKey, walletId, request, resolved });
+  let queued: Awaited<ReturnType<typeof enqueue>>;
+  try {
+    queued = await enqueue({ appId: ctx.app.id, network: ctx.network, type, idempotencyKey: ctx.idem, signerKey, walletId, request, resolved });
+  } catch (e) {
+    const k = e as { status?: number; code?: string; message?: string };
+    if (k.code === "IDEMPOTENCY_CONFLICT") return err(409, k.code, k.message);
+    throw e;
+  }
+  const { tx, replay } = queued;
   let final: TxRow | null = tx;
   if (!replay) await tick({ maxClaims: 5, budgetMs: 10_000 }).catch((e) => console.error("tick", e));
   if (ctx.url.searchParams.get("wait") === "true") final = await waitForTx(tx.id);
