@@ -39,7 +39,7 @@ function Page() {
 
 const short = (a?: string | null) => (a ? `${a.slice(0, 8)}…${a.slice(-6)}` : "pending");
 const voyager = (kind: "tx" | "contract", v: string) => `https://sepolia.voyager.online/${kind}/${v}`;
-const Stat = ({ label, value, hint }: { label: string; value: string | number; hint?: string }) => (
+const Stat = ({ label, value, hint }: { label: string; value: string | number; hint?: string | undefined }) => (
   <div className="rounded-xl border bg-card p-4">
     <p className="text-xs text-muted-foreground">{label}</p>
     <p className="mt-1 text-2xl font-semibold">{value}</p>
