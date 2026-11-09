@@ -137,7 +137,8 @@ export async function revokeAllSessions(walletId: string) {
   await db.from("wallet_sessions").update({ revoked_at: new Date().toISOString() }).eq("wallet_id", walletId).is("revoked_at", null);
 }
 
-async function sendOtp(wallet: { id: string; email: string }, app: App, ip: string | null) {
+async function sendOtp(wallet: { id: string; email: string | null }, app: App, ip: string | null) {
+  if (!wallet.email) throw new ApiError(400, "wallet_has_no_email");
   const code = randomOtp();
   await db.from("wallet_verifications").update({ consumed_at: new Date().toISOString() }).eq("wallet_id", wallet.id).is("consumed_at", null);
   const { data: ver } = await db.from("wallet_verifications").insert({
