@@ -1,0 +1,1 @@
+alter table public.registered_apps add column sandbox boolean not null default false;

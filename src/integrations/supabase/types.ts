@@ -226,6 +226,7 @@ export type Database = {
           name: string
           popup_enabled: boolean
           revoked_at: string | null
+          sandbox: boolean
           trusted_oauth: boolean
         }
         Insert: {
@@ -238,6 +239,7 @@ export type Database = {
           name: string
           popup_enabled?: boolean
           revoked_at?: string | null
+          sandbox?: boolean
           trusted_oauth?: boolean
         }
         Update: {
@@ -250,6 +252,7 @@ export type Database = {
           name?: string
           popup_enabled?: boolean
           revoked_at?: string | null
+          sandbox?: boolean
           trusted_oauth?: boolean
         }
         Relationships: []
