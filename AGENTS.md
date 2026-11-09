@@ -35,3 +35,4 @@ use the editor.
 - Starknet accounts must use the SNIP-9 class hash in `starknet.ts` with derivation calldata=[publicKey], salt=publicKey; the legacy OZ v0.8.1 class is rejected by paymasters.
 - Partner HTTP API lives under `src/routes/api/public/v1/` and goes through `handle()` in `http.ts` (X-App-Key + registered-origin check); session tokens, app keys and codes are stored only as SHA-256 hashes.
 - Popup sign-in uses an auth code + PKCE exchanged at `/api/public/v1/oauth/token`; replies use postMessage only to the requested origin, which must be registered.
+- OTP email goes through Resend directly (`email.server.ts`, RESEND_API_KEY / RESEND_FROM_ADDRESS); gas-free execution goes through the Token Factory AVNU paymaster proxy (`paymaster.server.ts`, overridable via PAYMASTER_URL), ported from Loop Do.

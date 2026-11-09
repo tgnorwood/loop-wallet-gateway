@@ -8,5 +8,5 @@
 - [x] Admin console
 - [x] Developer sandbox at /demo
 - [x] Tests (code rules, revoked tokens, origins, account type)
-- [ ] Email delivery of 6-digit codes — blocked: needs an email sender domain
-- [ ] Gasless deploy + transactions via AVNU paymaster — blocked: needs AVNU API key
+- [x] Email delivery of 6-digit codes via Resend
+- [x] Gas-free deploy + transactions via the Token Factory AVNU paymaster proxy
