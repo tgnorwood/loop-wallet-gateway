@@ -194,7 +194,7 @@ export async function dispatchV1(request: Request, path: string): Promise<Respon
     const op = signerKeyOperator(network);
 
     // wallets
-    if (a === "wallets" && !id && m === "POST") return createWallet(ctx);
+    if (a === "wallets" && !id && m === "POST") return await createWallet(ctx);
     if (a === "wallets" && !id && m === "GET") {
       const ext = url.searchParams.get("externalId");
       let q = db.from("wallets").select("*").eq("app_id", app.id).eq("network", network).order("created_at", { ascending: false }).limit(100);
@@ -203,27 +203,27 @@ export async function dispatchV1(request: Request, path: string): Promise<Respon
       return json((data ?? []).map(walletDto));
     }
     if (a === "wallets" && id && !b && m === "GET") return json(walletDto(await walletOf(ctx, id)));
-    if (a === "wallets" && id && b === "balances" && m === "GET") return balances(ctx, id);
-    if (a === "wallets" && id && b === "nfts" && m === "GET") return walletNfts(ctx, id);
+    if (a === "wallets" && id && b === "balances" && m === "GET") return await balances(ctx, id);
+    if (a === "wallets" && id && b === "nfts" && m === "GET") return await walletNfts(ctx, id);
 
     // tokens
     if (a === "tokens" && !id && m === "POST") {
       const v = parse(z.object({ name: str(64), symbol: z.string().trim().min(1).max(16).regex(/^[A-Za-z0-9]+$/), initialSupply: amount, swappable: z.boolean().optional() }), body);
       const raw = toBaseUnits(v.initialSupply);
       await capCheck(ctx, ["token.create", "token.mint"], raw, app.daily_mint_cap);
-      return queue(ctx, "token.create", op, null, v, { name: v.name, symbol: v.symbol.toUpperCase(), amountRaw: raw.toString(), swappable: String(!!v.swappable) });
+      return await queue(ctx, "token.create", op, null, v, { name: v.name, symbol: v.symbol.toUpperCase(), amountRaw: raw.toString(), swappable: String(!!v.swappable) });
     }
     if (a === "tokens" && !id && m === "GET") {
       const { data } = await db.from("tokens").select("id,name,symbol,address,decimals,swappable,created_at").eq("app_id", app.id).eq("network", network).order("created_at", { ascending: false });
       return json(data ?? []);
     }
-    if (a === "tokens" && id && !b && m === "GET") return tokenDetail(ctx, id);
+    if (a === "tokens" && id && !b && m === "GET") return await tokenDetail(ctx, id);
     if (a === "tokens" && id && b === "mint" && m === "POST") {
       const t = await tokenOf(ctx, id);
       const v = parse(z.object({ amount }), body);
       const raw = toBaseUnits(v.amount);
       await capCheck(ctx, ["token.create", "token.mint"], raw, app.daily_mint_cap);
-      return queue(ctx, "token.mint", op, null, { tokenId: id, ...v }, { token: t.address, amountRaw: raw.toString() });
+      return await queue(ctx, "token.mint", op, null, { tokenId: id, ...v }, { token: t.address, amountRaw: raw.toString() });
     }
     if (a === "tokens" && id && b === "distribute" && m === "POST") {
       const t = await tokenOf(ctx, id);
@@ -231,7 +231,7 @@ export async function dispatchV1(request: Request, path: string): Promise<Respon
       const raw = toBaseUnits(v.amount);
       await capCheck(ctx, ["token.distribute"], raw, app.daily_distribute_cap);
       const d = await destination(ctx, v);
-      return queue(ctx, "token.distribute", op, null, { tokenId: id, ...v }, { token: t.address, amountRaw: raw.toString(), ...d });
+      return await queue(ctx, "token.distribute", op, null, { tokenId: id, ...v }, { token: t.address, amountRaw: raw.toString(), ...d });
     }
 
     // token movement (holder signs)
@@ -240,13 +240,13 @@ export async function dispatchV1(request: Request, path: string): Promise<Respon
       const [w, t] = [await walletOf(ctx, v.fromWalletId), await tokenOf(ctx, v.tokenId)];
       if (!kindAllowed(w.kind, "movement")) throw new EngineError(403, "VALIDATION", "this wallet kind cannot move tokens");
       const d = await destination(ctx, v);
-      return queue(ctx, "transfer", signerKeyWallet(w.id), w.id, v, { token: t.address, amountRaw: toBaseUnits(v.amount).toString(), ...d });
+      return await queue(ctx, "transfer", signerKeyWallet(w.id), w.id, v, { token: t.address, amountRaw: toBaseUnits(v.amount).toString(), ...d });
     }
     if (a === "returns" && m === "POST") {
       const v = parse(z.object({ walletId: uuid, tokenId: uuid, amount }), body);
       const [w, t] = [await walletOf(ctx, v.walletId), await tokenOf(ctx, v.tokenId)];
       if (!kindAllowed(w.kind, "movement")) throw new EngineError(403, "VALIDATION", "this wallet kind cannot move tokens");
-      return queue(ctx, "return", signerKeyWallet(w.id), w.id, v, { token: t.address, amountRaw: toBaseUnits(v.amount).toString() });
+      return await queue(ctx, "return", signerKeyWallet(w.id), w.id, v, { token: t.address, amountRaw: toBaseUnits(v.amount).toString() });
     }
     if (a === "swaps" && m === "POST") {
       const v = parse(z.object({ walletId: uuid, fromTokenId: uuid, toTokenId: uuid, amount }), body);
@@ -254,7 +254,7 @@ export async function dispatchV1(request: Request, path: string): Promise<Respon
       const [w, f, t] = [await walletOf(ctx, v.walletId), await tokenOf(ctx, v.fromTokenId), await tokenOf(ctx, v.toTokenId)];
       if (!f.swappable || !t.swappable) throw new EngineError(403, "SWAP_NOT_ALLOWED", "both tokens must be marked swappable");
       if (!kindAllowed(w.kind, "movement")) throw new EngineError(403, "VALIDATION", "this wallet kind cannot move tokens");
-      return queue(ctx, "swap", signerKeyWallet(w.id), w.id, v, { fromToken: f.address, toToken: t.address, amountRaw: toBaseUnits(v.amount).toString() });
+      return await queue(ctx, "swap", signerKeyWallet(w.id), w.id, v, { fromToken: f.address, toToken: t.address, amountRaw: toBaseUnits(v.amount).toString() });
     }
 
     // collections
@@ -262,34 +262,34 @@ export async function dispatchV1(request: Request, path: string): Promise<Respon
       const v = parse(z.object({ name: str(64), symbol: z.string().trim().min(1).max(16), ownerWalletId: uuid, royaltyReceiver: addr.optional(), royaltyBps: z.number().int().min(0).max(10000).optional() }), body);
       const w = await walletOf(ctx, v.ownerWalletId);
       if (!kindAllowed(w.kind, "collection_owner")) throw new EngineError(400, "VALIDATION", "ownerWalletId must be a wallet of kind collection_owner");
-      return queue(ctx, "collection.create", op, null, v, { name: v.name, symbol: v.symbol, creator: w.address, ownerWalletId: w.id, royaltyReceiver: v.royaltyReceiver ?? w.address, royaltyBps: String(v.royaltyBps ?? 0) });
+      return await queue(ctx, "collection.create", op, null, v, { name: v.name, symbol: v.symbol, creator: w.address, ownerWalletId: w.id, royaltyReceiver: v.royaltyReceiver ?? w.address, royaltyBps: String(v.royaltyBps ?? 0) });
     }
     if (a === "collections" && !id && m === "GET") {
       const { data } = await db.from("collections").select("id,name,symbol,address,owner_wallet_id,royalty_receiver,royalty_bps,frozen,created_at").eq("app_id", app.id).eq("network", network).order("created_at", { ascending: false });
       return json(data ?? []);
     }
-    if (a === "collections" && id && !b && m === "GET") return collectionDetail(ctx, id);
+    if (a === "collections" && id && !b && m === "GET") return await collectionDetail(ctx, id);
     if (a === "collections" && id && b === "royalties" && m === "PATCH") {
       const col = await collectionOf(ctx, id); const w = await ownerWalletFor(ctx, col);
       const v = parse(z.object({ receiver: addr, bps: z.number().int().min(0).max(10000) }), body);
-      return queue(ctx, "collection.royalty", signerKeyWallet(w.id), w.id, { collectionId: id, ...v }, { collection: col.address, collectionId: id, receiver: v.receiver, bps: String(v.bps) });
+      return await queue(ctx, "collection.royalty", signerKeyWallet(w.id), w.id, { collectionId: id, ...v }, { collection: col.address, collectionId: id, receiver: v.receiver, bps: String(v.bps) });
     }
     if (a === "collections" && id && b === "freeze" && m === "POST") {
       const col = await collectionOf(ctx, id); const w = await ownerWalletFor(ctx, col);
       if (body["confirm"] !== true) throw new EngineError(400, "VALIDATION", 'freezing is permanent: send { "confirm": true }');
       if (col.frozen) throw new EngineError(409, "METADATA_FROZEN", "collection is already frozen");
-      return queue(ctx, "collection.freeze", signerKeyWallet(w.id), w.id, { collectionId: id, confirm: true }, { collection: col.address, collectionId: id });
+      return await queue(ctx, "collection.freeze", signerKeyWallet(w.id), w.id, { collectionId: id, confirm: true }, { collection: col.address, collectionId: id });
     }
     if (a === "collections" && id && b === "minters" && m === "POST" && !sub) {
       const col = await collectionOf(ctx, id); const w = await ownerWalletFor(ctx, col);
       const v = parse(z.object({ address: addr }), body);
-      return queue(ctx, "collection.minter.add", signerKeyWallet(w.id), w.id, { collectionId: id, ...v }, { collection: col.address, collectionId: id, minter: v.address });
+      return await queue(ctx, "collection.minter.add", signerKeyWallet(w.id), w.id, { collectionId: id, ...v }, { collection: col.address, collectionId: id, minter: v.address });
     }
     if (a === "collections" && id && b === "minters" && sub && m === "DELETE") {
       const col = await collectionOf(ctx, id); const w = await ownerWalletFor(ctx, col);
       parse(addr, sub);
       if (!canRemoveMinter(sub, process.env[`OPERATOR_ADDRESS_${network.toUpperCase()}`])) throw new EngineError(403, "OPERATOR_REQUIRED", "the operator can never be removed as a minter");
-      return queue(ctx, "collection.minter.remove", signerKeyWallet(w.id), w.id, { collectionId: id, address: sub }, { collection: col.address, collectionId: id, minter: sub });
+      return await queue(ctx, "collection.minter.remove", signerKeyWallet(w.id), w.id, { collectionId: id, address: sub }, { collection: col.address, collectionId: id, minter: sub });
     }
 
     // nfts
@@ -298,7 +298,7 @@ export async function dispatchV1(request: Request, path: string): Promise<Respon
       const v = parse(z.object({ tokenUri: str(512), attributes: attributes.optional(), media: media.optional(), ...dest }), body);
       if (col.frozen) throw new EngineError(409, "METADATA_FROZEN", "collection metadata is frozen");
       const d = await destination(ctx, v);
-      return queue(ctx, "nft.mint", op, null, { collectionId: id, ...v }, { collection: col.address, collectionId: id, tokenUri: v.tokenUri, ...d });
+      return await queue(ctx, "nft.mint", op, null, { collectionId: id, ...v }, { collection: col.address, collectionId: id, tokenUri: v.tokenUri, ...d });
     }
     if (a === "collections" && id && b === "nfts" && sub && !c && m === "GET") {
       const col = await collectionOf(ctx, id); const n = await nftRow(col, sub);
@@ -310,20 +310,20 @@ export async function dispatchV1(request: Request, path: string): Promise<Respon
       const col = await collectionOf(ctx, id); const w = await ownerWalletFor(ctx, col); const n = await nftRow(col, sub);
       const v = parse(z.object({ tokenUri: str(512).optional(), attributes: attributes.optional(), media: media.optional() }), body);
       if (n.frozen || col.frozen) throw new EngineError(409, "METADATA_FROZEN", "this NFT's metadata is frozen");
-      return queue(ctx, "nft.update", signerKeyWallet(w.id), w.id, { collectionId: id, tokenId: sub, ...v }, { collection: col.address, collectionId: id, tokenId: sub });
+      return await queue(ctx, "nft.update", signerKeyWallet(w.id), w.id, { collectionId: id, tokenId: sub, ...v }, { collection: col.address, collectionId: id, tokenId: sub });
     }
     if (a === "collections" && id && b === "nfts" && sub && c === "freeze" && m === "POST") {
       const col = await collectionOf(ctx, id); const w = await ownerWalletFor(ctx, col); const n = await nftRow(col, sub);
       if (body["confirm"] !== true) throw new EngineError(400, "VALIDATION", 'freezing is permanent: send { "confirm": true }');
       if (n.frozen) throw new EngineError(409, "METADATA_FROZEN", "already frozen");
-      return queue(ctx, "nft.freeze", signerKeyWallet(w.id), w.id, { collectionId: id, tokenId: sub, confirm: true }, { collection: col.address, collectionId: id, tokenId: sub });
+      return await queue(ctx, "nft.freeze", signerKeyWallet(w.id), w.id, { collectionId: id, tokenId: sub, confirm: true }, { collection: col.address, collectionId: id, tokenId: sub });
     }
     if (a === "nft-transfers" && m === "POST") {
       const v = parse(z.object({ collectionId: uuid, tokenId: z.string().regex(/^\d{1,40}$/), fromWalletId: uuid, ...dest }), body);
       const col = await collectionOf(ctx, v.collectionId); const w = await walletOf(ctx, v.fromWalletId);
       if (!kindAllowed(w.kind, "movement")) throw new EngineError(403, "VALIDATION", "this wallet kind cannot move NFTs");
       const d = await destination(ctx, v);
-      return queue(ctx, "nft.transfer", signerKeyWallet(w.id), w.id, v, { collection: col.address, collectionId: col.id, tokenId: v.tokenId, ...d });
+      return await queue(ctx, "nft.transfer", signerKeyWallet(w.id), w.id, v, { collection: col.address, collectionId: col.id, tokenId: v.tokenId, ...d });
     }
 
     // transactions
