@@ -40,7 +40,9 @@ Partner sites get two ways to connect:
 
 ## Starknet and sign-in changes
 
-- Wallets are Starknet accounts (starknet.js, OpenZeppelin account class). Address is computed up front, so users get one instantly; the account contract is deployed on its first signed transaction. Deploy fees are paid by a hub "fee wallet" (paymaster-style) that you fund with STRK; the fee wallet key is stored as a secret.
+- Wallets are Starknet accounts using the SNIP-9 account class `0x02b48623275dbaedb7f16ff5d0e7a4c722727d2a3e7c4477fa4650140834ba1f`. This class supports `execute_from_outside_v2`, so paymasters can sponsor transactions. The old OpenZeppelin v0.8.1 class (`0x061dac...`) will never be used, because paymasters rejected it with "invalid paymaster version".
+- Address derivation: `calldata = [publicKey]`, `salt = publicKey`, matching your existing scheme. Users get an address instantly. The account deploys gas-free on its first action through a sponsored `deploy_and_invoke` from the AVNU paymaster, so users never need STRK. The paymaster API key is stored as a secret.
+- A test checks that every new wallet uses the SNIP-9 class hash and that its address matches the expected derivation.
 - Balances/transfers come from a Starknet RPC (Sepolia testnet first, mainnet when you're ready). Signing uses Starknet typed data (SNIP-12) and invoke transactions instead of EVM.
 - Portal sign-in: email + password and Google only (no Apple for now). Password reset page included.
 - Partner API keeps the 6-digit email code for the "existing email" gate, since partner apps don't hold passwords.
