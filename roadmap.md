@@ -10,3 +10,10 @@
 - [x] Tests (code rules, revoked tokens, origins, account type)
 - [x] Email delivery of 6-digit codes via Resend
 - [x] Gas-free deploy + transactions via the Token Factory AVNU paymaster proxy
+- [x] Central tokens & NFT API (v1), transaction queue, webhooks, caps, audit log
+- [x] Chain dashboard (/dashboard) with activity log, tokens, collections, app settings, test-item hiding
+- [x] Wallet import tools (Loop Do same-address, new wallets, tokens)
+- [ ] Operator actions live — waiting on RELAY_API_KEY from Tom
+- [ ] Loop Do wallet import — waiting on Loop Do's derivation secret + CSV export
+- [ ] Loop Fans / PressChain switch-over — done in those projects, calling this API
+- [ ] Mainnet — waiting on Token Factory checklist (contracts, credits, locked paymaster proxy)
