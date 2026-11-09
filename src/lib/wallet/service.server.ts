@@ -140,15 +140,15 @@ export async function revokeAllSessions(walletId: string) {
 async function sendOtp(wallet: { id: string; email: string }, app: App, ip: string | null) {
   const code = randomOtp();
   await db.from("wallet_verifications").update({ consumed_at: new Date().toISOString() }).eq("wallet_id", wallet.id).is("consumed_at", null);
-  await db.from("wallet_verifications").insert({
+  const { data: ver } = await db.from("wallet_verifications").insert({
     wallet_id: wallet.id,
     app_id: app.id,
     code_hash: await sha256Hex(wallet.id + ":" + code),
     expires_at: new Date(Date.now() + OTP_TTL_MS).toISOString(),
-  });
-  // Email delivery is wired once an email sender domain is configured.
-  console.log(`[otp] code issued for wallet ${wallet.id}`);
-  await audit({ wallet_id: wallet.id, app_id: app.id, action: "otp_sent", ip });
+  }).select("id").single();
+  const { sendOtpEmail } = await import("./email.server");
+  const sent = await sendOtpEmail(wallet.email, code, `otp-${ver?.id ?? wallet.id}`);
+  await audit({ wallet_id: wallet.id, app_id: app.id, action: sent.ok ? "otp_sent" : "otp_send_failed", ip, details: sent.ok ? {} : { error: sent.error } });
   return app.sandbox ? { debug_code: code } : {};
 }
 
@@ -253,7 +253,7 @@ export async function getAssets(address: string) {
   const { data: items } = await db.from("app_assets").select("kind,name,amount,metadata,created_at").eq("wallet_id", w.id);
   let strk = "0";
   try {
-    const rpc = process.env["STARKNET_RPC_URL"] ?? "https://api.cartridge.gg/x/starknet/sepolia";
+    const rpc = process.env["STARKNET_RPC_URL"] ?? "https://api.zan.top/public/starknet-sepolia";
     const res = await fetch(rpc, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -338,4 +338,20 @@ export async function requireConnection(walletId: string, app: App, origin: stri
   if (!isOriginAllowed(origin, app.allowed_origins)) throw new ApiError(403, "origin_not_allowed");
   const { data } = await db.from("app_connections").select("revoked_at").eq("wallet_id", walletId).eq("app_id", app.id).maybeSingle();
   if (!data || data.revoked_at) throw new ApiError(403, "not_connected");
+}
+
+export async function executeForWallet(walletId: string, appId: string | null, calls: import("./paymaster").Call[], ip: string | null) {
+  await rateLimit(`exec:${walletId}`, 10, 60_000);
+  const { data: w } = await db.from("wallets").select("*").eq("id", walletId).single();
+  const pk = await decryptSecret(w!.encrypted_private_key, encKey());
+  const { executeSponsored } = await import("./paymaster.server");
+  try {
+    const r = await executeSponsored({ address: w!.address, publicKey: w!.public_key, privateKey: pk, deployed: w!.deployed, calls });
+    if (!w!.deployed) await db.from("wallets").update({ deployed: true }).eq("id", walletId);
+    await audit({ wallet_id: walletId, app_id: appId, action: "executed_transaction", ip, details: { tx_hash: r.transaction_hash, deployed_now: r.deployed_now, calls: calls.length } });
+    return { address: w!.address, ...r };
+  } catch (e) {
+    await audit({ wallet_id: walletId, app_id: appId, action: "transaction_failed", ip, details: { error: String((e as Error).message).slice(0, 500) } });
+    throw new ApiError(502, "sponsorship_failed", (e as Error).message);
+  }
 }
