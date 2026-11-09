@@ -113,7 +113,7 @@ export const adminImport = createServerFn({ method: "POST" })
     }
     const res = await mig.importWallets({
       appId: data.appId, source: data.mode === "loop-do-wallets" ? "loop-do" : "new", dryRun: data.dryRun, actor: context.userId,
-      rows: rows.map((r) => ({ externalId: r["user_id"] || r["external_id"] || r["externalid"] || r["email"] || "", email: r["email"], salt: r["salt"], address: r["address"], kind: r["kind"] || undefined })).filter((r) => r.externalId),
+      rows: rows.map((r) => ({ externalId: r["user_id"] || r["external_id"] || r["externalid"] || r["email"] || "", email: r["email"], salt: r["salt"], privateKey: r["private_key"] || undefined, address: r["address"], kind: r["kind"] || undefined })).filter((r) => r.externalId),
     });
     return { rows: res };
   });

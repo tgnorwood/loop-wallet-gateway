@@ -22,14 +22,14 @@ export async function deriveLoopDoKey(pepper: string, userId: string, salt: stri
   return { privateKey, publicKey, address: deriveAddress(publicKey) };
 }
 
-export type ImportRow = { externalId: string; email?: string | undefined; salt?: string | undefined; address?: string | undefined; kind?: string | undefined };
+export type ImportRow = { externalId: string; privateKey?: string | undefined; email?: string | undefined; salt?: string | undefined; address?: string | undefined; kind?: string | undefined };
 export type ImportResult = { externalId: string; status: "created" | "exists" | "mismatch" | "error" | "would_create"; address?: string; note?: string };
 
 export async function importWallets(p: { appId: string; source: "loop-do" | "new"; rows: ImportRow[]; dryRun: boolean; actor: string }) {
   const encKey = process.env["WALLET_ENCRYPTION_KEY"];
   if (!encKey) throw new Error("WALLET_ENCRYPTION_KEY missing");
   const pepper = process.env["LOOPDO_WALLET_DERIVATION_SECRET"];
-  if (p.source === "loop-do" && !pepper) throw new Error("Add the Loop Do derivation secret (LOOPDO_WALLET_DERIVATION_SECRET) first");
+  if (p.source === "loop-do" && !pepper && p.rows.some((r) => !r.privateKey)) throw new Error("Rows need a private_key column (or the correct Loop Do derivation secret)");
   const out: ImportResult[] = [];
   for (const row of p.rows) {
     try {
@@ -37,8 +37,14 @@ export async function importWallets(p: { appId: string; source: "loop-do" | "new
       if (exists) { out.push({ externalId: row.externalId, status: "exists", address: exists.address }); continue; }
       let w: { privateKey: string; publicKey: string; address: string };
       if (p.source === "loop-do") {
-        if (!row.salt) { out.push({ externalId: row.externalId, status: "error", note: "salt missing" }); continue; }
-        w = await deriveLoopDoKey(pepper!, row.externalId, row.salt);
+        if (row.privateKey) {
+          if (!/^0x[0-9a-fA-F]{1,64}$/.test(row.privateKey)) { out.push({ externalId: row.externalId, status: "error", note: "private_key is not a 0x hex value" }); continue; }
+          const publicKey = ec.starkCurve.getStarkKey(row.privateKey);
+          w = { privateKey: row.privateKey, publicKey, address: deriveAddress(publicKey) };
+        } else {
+          if (!row.salt) { out.push({ externalId: row.externalId, status: "error", note: "salt or private_key missing" }); continue; }
+          w = await deriveLoopDoKey(pepper!, row.externalId, row.salt);
+        }
         if (row.address && !sameAddress(row.address, w.address)) { out.push({ externalId: row.externalId, status: "mismatch", address: w.address, note: `expected ${row.address}` }); continue; }
       } else {
         w = generateWallet();
