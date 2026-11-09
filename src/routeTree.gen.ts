@@ -10,7 +10,10 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AdminRouteImport } from './routes/admin'
 import { Route as ConnectRouteImport } from './routes/connect'
+import { Route as DemoRouteImport } from './routes/demo'
+import { Route as DocsRouteImport } from './routes/docs'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as ConnectSignRouteImport } from './routes/connect.sign'
 import { Route as ApiPublicV1OauthTokenRouteImport } from './routes/api/public/v1/oauth/token'
@@ -25,9 +28,24 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminRoute = AdminRouteImport.update({
+  id: '/admin',
+  path: '/admin',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ConnectRoute = ConnectRouteImport.update({
   id: '/connect',
   path: '/connect',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DemoRoute = DemoRouteImport.update({
+  id: '/demo',
+  path: '/demo',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DocsRoute = DocsRouteImport.update({
+  id: '/docs',
+  path: '/docs',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ResetPasswordRoute = ResetPasswordRouteImport.update({
@@ -77,7 +95,10 @@ const ApiPublicV1WalletAddressAssetsRoute =
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/admin': typeof AdminRoute
   '/connect': typeof ConnectRouteWithChildren
+  '/demo': typeof DemoRoute
+  '/docs': typeof DocsRoute
   '/reset-password': typeof ResetPasswordRoute
   '/connect/sign': typeof ConnectSignRoute
   '/api/public/v1/oauth/token': typeof ApiPublicV1OauthTokenRoute
@@ -89,7 +110,10 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/admin': typeof AdminRoute
   '/connect': typeof ConnectRouteWithChildren
+  '/demo': typeof DemoRoute
+  '/docs': typeof DocsRoute
   '/reset-password': typeof ResetPasswordRoute
   '/connect/sign': typeof ConnectSignRoute
   '/api/public/v1/oauth/token': typeof ApiPublicV1OauthTokenRoute
@@ -102,7 +126,10 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/admin': typeof AdminRoute
   '/connect': typeof ConnectRouteWithChildren
+  '/demo': typeof DemoRoute
+  '/docs': typeof DocsRoute
   '/reset-password': typeof ResetPasswordRoute
   '/connect/sign': typeof ConnectSignRoute
   '/api/public/v1/oauth/token': typeof ApiPublicV1OauthTokenRoute
@@ -116,7 +143,10 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/admin'
     | '/connect'
+    | '/demo'
+    | '/docs'
     | '/reset-password'
     | '/connect/sign'
     | '/api/public/v1/oauth/token'
@@ -128,7 +158,10 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/admin'
     | '/connect'
+    | '/demo'
+    | '/docs'
     | '/reset-password'
     | '/connect/sign'
     | '/api/public/v1/oauth/token'
@@ -140,7 +173,10 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/admin'
     | '/connect'
+    | '/demo'
+    | '/docs'
     | '/reset-password'
     | '/connect/sign'
     | '/api/public/v1/oauth/token'
@@ -153,7 +189,10 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AdminRoute: typeof AdminRoute
   ConnectRoute: typeof ConnectRouteWithChildren
+  DemoRoute: typeof DemoRoute
+  DocsRoute: typeof DocsRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
   ApiPublicV1OauthTokenRoute: typeof ApiPublicV1OauthTokenRoute
   ApiPublicV1WalletGetOrCreateRoute: typeof ApiPublicV1WalletGetOrCreateRoute
@@ -172,11 +211,32 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin': {
+      id: '/admin'
+      path: '/admin'
+      fullPath: '/admin'
+      preLoaderRoute: typeof AdminRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/connect': {
       id: '/connect'
       path: '/connect'
       fullPath: '/connect'
       preLoaderRoute: typeof ConnectRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/demo': {
+      id: '/demo'
+      path: '/demo'
+      fullPath: '/demo'
+      preLoaderRoute: typeof DemoRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/docs': {
+      id: '/docs'
+      path: '/docs'
+      fullPath: '/docs'
+      preLoaderRoute: typeof DocsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/reset-password': {
@@ -251,7 +311,10 @@ const ConnectRouteWithChildren =
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AdminRoute: AdminRoute,
   ConnectRoute: ConnectRouteWithChildren,
+  DemoRoute: DemoRoute,
+  DocsRoute: DocsRoute,
   ResetPasswordRoute: ResetPasswordRoute,
   ApiPublicV1OauthTokenRoute: ApiPublicV1OauthTokenRoute,
   ApiPublicV1WalletGetOrCreateRoute: ApiPublicV1WalletGetOrCreateRoute,
