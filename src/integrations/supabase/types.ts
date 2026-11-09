@@ -197,6 +197,107 @@ export type Database = {
           },
         ]
       }
+      collections: {
+        Row: {
+          address: string | null
+          app_id: string
+          created_at: string
+          created_tx: string | null
+          frozen: boolean
+          id: string
+          is_test: boolean
+          name: string
+          network: string
+          owner_wallet_id: string
+          royalty_bps: number
+          royalty_receiver: string | null
+          symbol: string
+        }
+        Insert: {
+          address?: string | null
+          app_id: string
+          created_at?: string
+          created_tx?: string | null
+          frozen?: boolean
+          id?: string
+          is_test?: boolean
+          name: string
+          network?: string
+          owner_wallet_id: string
+          royalty_bps?: number
+          royalty_receiver?: string | null
+          symbol: string
+        }
+        Update: {
+          address?: string | null
+          app_id?: string
+          created_at?: string
+          created_tx?: string | null
+          frozen?: boolean
+          id?: string
+          is_test?: boolean
+          name?: string
+          network?: string
+          owner_wallet_id?: string
+          royalty_bps?: number
+          royalty_receiver?: string | null
+          symbol?: string
+        }
+        Relationships: []
+      }
+      nfts: {
+        Row: {
+          attributes: Json
+          collection_id: string
+          created_at: string
+          frozen: boolean
+          id: string
+          media: Json
+          minted_tx: string | null
+          owner_address: string
+          owner_wallet_id: string | null
+          token_id: string
+          token_uri: string | null
+          updated_at: string
+        }
+        Insert: {
+          attributes?: Json
+          collection_id: string
+          created_at?: string
+          frozen?: boolean
+          id?: string
+          media?: Json
+          minted_tx?: string | null
+          owner_address: string
+          owner_wallet_id?: string | null
+          token_id: string
+          token_uri?: string | null
+          updated_at?: string
+        }
+        Update: {
+          attributes?: Json
+          collection_id?: string
+          created_at?: string
+          frozen?: boolean
+          id?: string
+          media?: Json
+          minted_tx?: string | null
+          owner_address?: string
+          owner_wallet_id?: string | null
+          token_id?: string
+          token_uri?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "nfts_collection_id_fkey"
+            columns: ["collection_id"]
+            isOneToOne: false
+            referencedRelation: "collections"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       rate_limits: {
         Row: {
           count: number
@@ -220,40 +321,169 @@ export type Database = {
           allowed_origins: string[]
           api_enabled: boolean
           created_at: string
+          daily_distribute_cap: number | null
+          daily_mint_cap: number | null
           id: string
           key_hash: string
           key_prefix: string
+          mainnet_enabled: boolean
           name: string
           popup_enabled: boolean
+          rate_limit_per_min: number
           revoked_at: string | null
           sandbox: boolean
           trusted_oauth: boolean
+          webhook_secret: string | null
+          webhook_url: string | null
         }
         Insert: {
           allowed_origins?: string[]
           api_enabled?: boolean
           created_at?: string
+          daily_distribute_cap?: number | null
+          daily_mint_cap?: number | null
           id?: string
           key_hash: string
           key_prefix: string
+          mainnet_enabled?: boolean
           name: string
           popup_enabled?: boolean
+          rate_limit_per_min?: number
           revoked_at?: string | null
           sandbox?: boolean
           trusted_oauth?: boolean
+          webhook_secret?: string | null
+          webhook_url?: string | null
         }
         Update: {
           allowed_origins?: string[]
           api_enabled?: boolean
           created_at?: string
+          daily_distribute_cap?: number | null
+          daily_mint_cap?: number | null
           id?: string
           key_hash?: string
           key_prefix?: string
+          mainnet_enabled?: boolean
           name?: string
           popup_enabled?: boolean
+          rate_limit_per_min?: number
           revoked_at?: string | null
           sandbox?: boolean
           trusted_oauth?: boolean
+          webhook_secret?: string | null
+          webhook_url?: string | null
+        }
+        Relationships: []
+      }
+      tokens: {
+        Row: {
+          address: string | null
+          app_id: string
+          created_at: string
+          created_tx: string | null
+          decimals: number
+          id: string
+          is_test: boolean
+          name: string
+          network: string
+          swappable: boolean
+          symbol: string
+        }
+        Insert: {
+          address?: string | null
+          app_id: string
+          created_at?: string
+          created_tx?: string | null
+          decimals?: number
+          id?: string
+          is_test?: boolean
+          name: string
+          network?: string
+          swappable?: boolean
+          symbol: string
+        }
+        Update: {
+          address?: string | null
+          app_id?: string
+          created_at?: string
+          created_tx?: string | null
+          decimals?: number
+          id?: string
+          is_test?: boolean
+          name?: string
+          network?: string
+          swappable?: boolean
+          symbol?: string
+        }
+        Relationships: []
+      }
+      transactions: {
+        Row: {
+          app_id: string
+          attempts: number
+          confirmed_at: string | null
+          created_at: string
+          error_code: string | null
+          error_message: string | null
+          id: string
+          idempotency_key: string
+          network: string
+          next_attempt_at: string | null
+          request: Json
+          request_hash: string
+          result: Json | null
+          signer_key: string
+          started_at: string | null
+          status: string
+          submitted_at: string | null
+          tx_hash: string | null
+          type: string
+          wallet_id: string | null
+        }
+        Insert: {
+          app_id: string
+          attempts?: number
+          confirmed_at?: string | null
+          created_at?: string
+          error_code?: string | null
+          error_message?: string | null
+          id?: string
+          idempotency_key: string
+          network?: string
+          next_attempt_at?: string | null
+          request?: Json
+          request_hash: string
+          result?: Json | null
+          signer_key: string
+          started_at?: string | null
+          status?: string
+          submitted_at?: string | null
+          tx_hash?: string | null
+          type: string
+          wallet_id?: string | null
+        }
+        Update: {
+          app_id?: string
+          attempts?: number
+          confirmed_at?: string | null
+          created_at?: string
+          error_code?: string | null
+          error_message?: string | null
+          id?: string
+          idempotency_key?: string
+          network?: string
+          next_attempt_at?: string | null
+          request?: Json
+          request_hash?: string
+          result?: Json | null
+          signer_key?: string
+          started_at?: string | null
+          status?: string
+          submitted_at?: string | null
+          tx_hash?: string | null
+          type?: string
+          wallet_id?: string | null
         }
         Relationships: []
       }
@@ -380,13 +610,19 @@ export type Database = {
       wallets: {
         Row: {
           address: string
+          app_id: string | null
           class_hash: string
           created_at: string
           created_by_app: string | null
           deployed: boolean
-          email: string
+          email: string | null
           encrypted_private_key: string
+          external_id: string | null
           id: string
+          imported_from: string | null
+          key_version: number
+          kind: string
+          label: string | null
           network: string
           public_key: string
           updated_at: string
@@ -396,13 +632,19 @@ export type Database = {
         }
         Insert: {
           address: string
+          app_id?: string | null
           class_hash: string
           created_at?: string
           created_by_app?: string | null
           deployed?: boolean
-          email: string
+          email?: string | null
           encrypted_private_key: string
+          external_id?: string | null
           id?: string
+          imported_from?: string | null
+          key_version?: number
+          kind?: string
+          label?: string | null
           network?: string
           public_key: string
           updated_at?: string
@@ -412,13 +654,19 @@ export type Database = {
         }
         Update: {
           address?: string
+          app_id?: string | null
           class_hash?: string
           created_at?: string
           created_by_app?: string | null
           deployed?: boolean
-          email?: string
+          email?: string | null
           encrypted_private_key?: string
+          external_id?: string | null
           id?: string
+          imported_from?: string | null
+          key_version?: number
+          kind?: string
+          label?: string | null
           network?: string
           public_key?: string
           updated_at?: string
@@ -428,11 +676,81 @@ export type Database = {
         }
         Relationships: []
       }
+      webhook_deliveries: {
+        Row: {
+          app_id: string
+          attempts: number
+          created_at: string
+          event: string
+          id: string
+          last_error: string | null
+          next_attempt_at: string
+          payload: Json
+          status: string
+          transaction_id: string
+        }
+        Insert: {
+          app_id: string
+          attempts?: number
+          created_at?: string
+          event: string
+          id?: string
+          last_error?: string | null
+          next_attempt_at?: string
+          payload: Json
+          status?: string
+          transaction_id: string
+        }
+        Update: {
+          app_id?: string
+          attempts?: number
+          created_at?: string
+          event?: string
+          id?: string
+          last_error?: string | null
+          next_attempt_at?: string
+          payload?: Json
+          status?: string
+          transaction_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
+      claim_transactions: {
+        Args: { _max?: number }
+        Returns: {
+          app_id: string
+          attempts: number
+          confirmed_at: string | null
+          created_at: string
+          error_code: string | null
+          error_message: string | null
+          id: string
+          idempotency_key: string
+          network: string
+          next_attempt_at: string | null
+          request: Json
+          request_hash: string
+          result: Json | null
+          signer_key: string
+          started_at: string | null
+          status: string
+          submitted_at: string | null
+          tx_hash: string | null
+          type: string
+          wallet_id: string | null
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "transactions"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]

@@ -15,6 +15,13 @@
       "when": 1794256597777,
       "tag": "0001_migration",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1794266151070,
+      "tag": "0002_central_wallet_engine",
+      "breakpoints": true
     }
   ]
 }
