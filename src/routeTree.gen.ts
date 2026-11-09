@@ -10,33 +10,119 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ApiPublicV1OauthTokenRouteImport } from './routes/api/public/v1/oauth/token'
+import { Route as ApiPublicV1WalletGetOrCreateRouteImport } from './routes/api/public/v1/wallet/get-or-create'
+import { Route as ApiPublicV1WalletResendOtpRouteImport } from './routes/api/public/v1/wallet/resend-otp'
+import { Route as ApiPublicV1WalletSignRouteImport } from './routes/api/public/v1/wallet/sign'
+import { Route as ApiPublicV1WalletVerifyOtpRouteImport } from './routes/api/public/v1/wallet/verify-otp'
+import { Route as ApiPublicV1WalletAddressAssetsRouteImport } from './routes/api/public/v1/wallet/$address.assets'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiPublicV1OauthTokenRoute = ApiPublicV1OauthTokenRouteImport.update({
+  id: '/api/public/v1/oauth/token',
+  path: '/api/public/v1/oauth/token',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiPublicV1WalletGetOrCreateRoute =
+  ApiPublicV1WalletGetOrCreateRouteImport.update({
+    id: '/api/public/v1/wallet/get-or-create',
+    path: '/api/public/v1/wallet/get-or-create',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiPublicV1WalletResendOtpRoute =
+  ApiPublicV1WalletResendOtpRouteImport.update({
+    id: '/api/public/v1/wallet/resend-otp',
+    path: '/api/public/v1/wallet/resend-otp',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiPublicV1WalletSignRoute = ApiPublicV1WalletSignRouteImport.update({
+  id: '/api/public/v1/wallet/sign',
+  path: '/api/public/v1/wallet/sign',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiPublicV1WalletVerifyOtpRoute =
+  ApiPublicV1WalletVerifyOtpRouteImport.update({
+    id: '/api/public/v1/wallet/verify-otp',
+    path: '/api/public/v1/wallet/verify-otp',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiPublicV1WalletAddressAssetsRoute =
+  ApiPublicV1WalletAddressAssetsRouteImport.update({
+    id: '/api/public/v1/wallet/$address/assets',
+    path: '/api/public/v1/wallet/$address/assets',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/api/public/v1/oauth/token': typeof ApiPublicV1OauthTokenRoute
+  '/api/public/v1/wallet/get-or-create': typeof ApiPublicV1WalletGetOrCreateRoute
+  '/api/public/v1/wallet/resend-otp': typeof ApiPublicV1WalletResendOtpRoute
+  '/api/public/v1/wallet/sign': typeof ApiPublicV1WalletSignRoute
+  '/api/public/v1/wallet/verify-otp': typeof ApiPublicV1WalletVerifyOtpRoute
+  '/api/public/v1/wallet/$address/assets': typeof ApiPublicV1WalletAddressAssetsRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/api/public/v1/oauth/token': typeof ApiPublicV1OauthTokenRoute
+  '/api/public/v1/wallet/get-or-create': typeof ApiPublicV1WalletGetOrCreateRoute
+  '/api/public/v1/wallet/resend-otp': typeof ApiPublicV1WalletResendOtpRoute
+  '/api/public/v1/wallet/sign': typeof ApiPublicV1WalletSignRoute
+  '/api/public/v1/wallet/verify-otp': typeof ApiPublicV1WalletVerifyOtpRoute
+  '/api/public/v1/wallet/$address/assets': typeof ApiPublicV1WalletAddressAssetsRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/api/public/v1/oauth/token': typeof ApiPublicV1OauthTokenRoute
+  '/api/public/v1/wallet/get-or-create': typeof ApiPublicV1WalletGetOrCreateRoute
+  '/api/public/v1/wallet/resend-otp': typeof ApiPublicV1WalletResendOtpRoute
+  '/api/public/v1/wallet/sign': typeof ApiPublicV1WalletSignRoute
+  '/api/public/v1/wallet/verify-otp': typeof ApiPublicV1WalletVerifyOtpRoute
+  '/api/public/v1/wallet/$address/assets': typeof ApiPublicV1WalletAddressAssetsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/'
+  fullPaths:
+    | '/'
+    | '/api/public/v1/oauth/token'
+    | '/api/public/v1/wallet/get-or-create'
+    | '/api/public/v1/wallet/resend-otp'
+    | '/api/public/v1/wallet/sign'
+    | '/api/public/v1/wallet/verify-otp'
+    | '/api/public/v1/wallet/$address/assets'
   fileRoutesByTo: FileRoutesByTo
-  to: '/'
-  id: '__root__' | '/'
+  to:
+    | '/'
+    | '/api/public/v1/oauth/token'
+    | '/api/public/v1/wallet/get-or-create'
+    | '/api/public/v1/wallet/resend-otp'
+    | '/api/public/v1/wallet/sign'
+    | '/api/public/v1/wallet/verify-otp'
+    | '/api/public/v1/wallet/$address/assets'
+  id:
+    | '__root__'
+    | '/'
+    | '/api/public/v1/oauth/token'
+    | '/api/public/v1/wallet/get-or-create'
+    | '/api/public/v1/wallet/resend-otp'
+    | '/api/public/v1/wallet/sign'
+    | '/api/public/v1/wallet/verify-otp'
+    | '/api/public/v1/wallet/$address/assets'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  ApiPublicV1OauthTokenRoute: typeof ApiPublicV1OauthTokenRoute
+  ApiPublicV1WalletGetOrCreateRoute: typeof ApiPublicV1WalletGetOrCreateRoute
+  ApiPublicV1WalletResendOtpRoute: typeof ApiPublicV1WalletResendOtpRoute
+  ApiPublicV1WalletSignRoute: typeof ApiPublicV1WalletSignRoute
+  ApiPublicV1WalletVerifyOtpRoute: typeof ApiPublicV1WalletVerifyOtpRoute
+  ApiPublicV1WalletAddressAssetsRoute: typeof ApiPublicV1WalletAddressAssetsRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -48,11 +134,59 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/v1/oauth/token': {
+      id: '/api/public/v1/oauth/token'
+      path: '/api/public/v1/oauth/token'
+      fullPath: '/api/public/v1/oauth/token'
+      preLoaderRoute: typeof ApiPublicV1OauthTokenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/public/v1/wallet/get-or-create': {
+      id: '/api/public/v1/wallet/get-or-create'
+      path: '/api/public/v1/wallet/get-or-create'
+      fullPath: '/api/public/v1/wallet/get-or-create'
+      preLoaderRoute: typeof ApiPublicV1WalletGetOrCreateRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/public/v1/wallet/resend-otp': {
+      id: '/api/public/v1/wallet/resend-otp'
+      path: '/api/public/v1/wallet/resend-otp'
+      fullPath: '/api/public/v1/wallet/resend-otp'
+      preLoaderRoute: typeof ApiPublicV1WalletResendOtpRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/public/v1/wallet/sign': {
+      id: '/api/public/v1/wallet/sign'
+      path: '/api/public/v1/wallet/sign'
+      fullPath: '/api/public/v1/wallet/sign'
+      preLoaderRoute: typeof ApiPublicV1WalletSignRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/public/v1/wallet/verify-otp': {
+      id: '/api/public/v1/wallet/verify-otp'
+      path: '/api/public/v1/wallet/verify-otp'
+      fullPath: '/api/public/v1/wallet/verify-otp'
+      preLoaderRoute: typeof ApiPublicV1WalletVerifyOtpRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/public/v1/wallet/$address/assets': {
+      id: '/api/public/v1/wallet/$address/assets'
+      path: '/api/public/v1/wallet/$address/assets'
+      fullPath: '/api/public/v1/wallet/$address/assets'
+      preLoaderRoute: typeof ApiPublicV1WalletAddressAssetsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  ApiPublicV1OauthTokenRoute: ApiPublicV1OauthTokenRoute,
+  ApiPublicV1WalletGetOrCreateRoute: ApiPublicV1WalletGetOrCreateRoute,
+  ApiPublicV1WalletResendOtpRoute: ApiPublicV1WalletResendOtpRoute,
+  ApiPublicV1WalletSignRoute: ApiPublicV1WalletSignRoute,
+  ApiPublicV1WalletVerifyOtpRoute: ApiPublicV1WalletVerifyOtpRoute,
+  ApiPublicV1WalletAddressAssetsRoute: ApiPublicV1WalletAddressAssetsRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
