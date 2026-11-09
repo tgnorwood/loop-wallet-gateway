@@ -9,6 +9,16 @@ Build the hub described in your brief as a new app. The uploaded `cloud_wallet` 
 3. **Admin Console (`/admin`)** — admin-only. Create/revoke app keys and allowed domains, metrics (total wallets, % verified, recent takeovers, signing requests), search by email or 0x address with full audit history and a "Revoke Sessions" button.
 4. **Partner API** — `/api/public/v1/wallet/get-or-create`, `verify-otp`, `resend-otp`, `:address/assets`, `sign`, all protected by `X-App-Key` with CORS limited to each app's domains.
 
+## "Log in with Loop Wallet" popup (for Loop Fans and other platforms)
+
+Partner sites get two ways to connect:
+
+- **Popup:** a partner adds a small script and a "Log in with Loop Wallet" button. Clicking it opens a hub-hosted popup (`/connect?app=...`). There the user signs in with email + password or Google (or creates a wallet instantly). They then see an approval screen ("Loop Fans wants to see your wallet address and request signatures"). After they approve, the popup sends the wallet address and a short-lived session token back to the partner site, which then knows who the user is.
+- **Signing popup:** when the partner needs a signature or transaction, the script opens `/connect/sign`. The user sees what they're signing and approves it. The signature goes back to the partner site.
+- **API access:** partners with an app key can still call the Partner API from their servers (get-or-create by email, verify code, assets, sign) for custom flows without the popup.
+- Admins can turn popup and/or API access on or off per app, along with each app's allowed domains. The popup only replies to those domains.
+- The portal shows "Connected apps", and users can disconnect any of them.
+
 ## Flows (as specified)
 
 - New email: create wallet (unverified), return address + session token immediately.
@@ -24,6 +34,7 @@ Build the hub described in your brief as a new app. The uploaded `cloud_wallet` 
 - OTP email via Lovable's built-in email (needs an email sender domain set up).
 - Assets endpoint reads native balance + recent transfers from a public EVM RPC (default: Polygon; configurable), plus points/badges stored in an `app_assets` table apps can write to later.
 - Signing: `personal_sign` messages and EIP-1559 transactions via viem; logged as `signed_transaction`.
+- Popup: `/connect` and `/connect/sign` routes. They communicate through `window.postMessage`, checked against the app's registered origins. A short-lived authorization code is swapped for a token, either by the partner's server or by the browser using a PKCE-style verifier. Table `app_connections` stores user approvals per app. The script is served at `/sdk/loop-wallet.js`.
 - Rate limits stored in the database (workers are stateless).
 - Tests for: OTP expiry/attempt limits, resend cooldown, takeover revoking sessions, revoked token rejected by `sign`.
 
