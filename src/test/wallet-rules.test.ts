@@ -52,3 +52,21 @@ describe("starknet account type", () => {
     expect(BigInt(deriveAddress(pub))).toBe(BigInt(expected));
   });
 });
+
+import { buildDeployment, buildTransaction } from "@/lib/wallet/paymaster";
+
+describe("gas-free deploy payload", () => {
+  const pub = "0x2ad51f18e78970e6678f776adf5d51861ef59c0202ba72fc7699097d501098e";
+  const addr = deriveAddress(pub);
+  it("uses the SNIP-9 class with salt and calldata = public key", () => {
+    const d = buildDeployment(addr, pub, false)!;
+    expect(BigInt(d.class_hash)).toBe(BigInt(ACCOUNT_CLASS_HASH));
+    expect(BigInt(d.salt)).toBe(BigInt(pub));
+    expect(d.calldata.map(BigInt)).toEqual([BigInt(pub)]);
+  });
+  it("deploys only while the account is not deployed", () => {
+    expect(buildTransaction(addr, [], buildDeployment(addr, pub, false)).type).toBe("deploy_and_invoke");
+    expect(buildDeployment(addr, pub, true)).toBeNull();
+    expect(buildTransaction(addr, [], null).type).toBe("invoke");
+  });
+});

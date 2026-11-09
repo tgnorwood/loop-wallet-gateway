@@ -4,7 +4,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { Button } from "@/components/ui/button";
 import { SignInCard } from "@/components/SignInCard";
 import { useAuth } from "@/hooks/use-auth";
-import { approveSign } from "@/lib/wallet/portal.functions";
+import { approveExecute, approveSign } from "@/lib/wallet/portal.functions";
 import { Shell, reply, usePartnerApp } from "@/components/connect-shared";
 
 export const Route = createFileRoute("/connect/sign")({
@@ -24,7 +24,10 @@ function SignPopup() {
   const { user, loading } = useAuth();
   const app = usePartnerApp(appId);
   const sign = useServerFn(approveSign);
+  const exec = useServerFn(approveExecute);
   const [typed, setTyped] = useState<Record<string, unknown> | null>(null);
+  const [calls, setCalls] = useState<unknown[] | null>(null);
+  const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   // Partner sends the typed data via postMessage after the popup announces it is ready.
@@ -32,7 +35,9 @@ function SignPopup() {
     if (!origin) return;
     const onMsg = (e: MessageEvent) => {
       if (e.origin !== new URL(origin).origin) return;
-      if (e.data?.source === "loop-wallet-sdk" && e.data.type === "sign_request") setTyped(e.data.typedData);
+      if (e.data?.source !== "loop-wallet-sdk") return;
+      if (e.data.type === "sign_request") setTyped(e.data.typedData);
+      if (e.data.type === "execute_request") setCalls(e.data.calls);
     };
     window.addEventListener("message", onMsg);
     reply(origin, { type: "ready" });
@@ -47,28 +52,37 @@ function SignPopup() {
   return (
     <Shell>
       <div className="w-full max-w-md rounded-xl border bg-card p-6">
-        <h1 className="text-xl font-semibold">{app.name} wants you to sign</h1>
+        <h1 className="text-xl font-semibold">{app.name} {calls ? "wants to send a transaction" : "wants you to sign"}</h1>
         <p className="mt-1 text-xs text-muted-foreground">{new URL(origin).host}</p>
         <pre className="mt-4 max-h-64 overflow-auto rounded bg-muted p-3 font-mono text-xs">
-          {typed ? JSON.stringify((typed as { message?: unknown }).message ?? typed, null, 2) : "Waiting for request…"}
+          {calls ? JSON.stringify(calls, null, 2) : typed ? JSON.stringify((typed as { message?: unknown }).message ?? typed, null, 2) : "Waiting for request…"}
         </pre>
+        {calls && <p className="mt-2 text-xs text-muted-foreground">Gas is covered for you. No STRK needed.</p>}
         {err && <p className="mt-3 text-sm text-destructive">{err}</p>}
         <div className="mt-5 flex gap-2">
           <Button variant="secondary" className="flex-1" onClick={() => { reply(origin, { type: "cancel" }); window.close(); }}>Reject</Button>
           <Button
             className="flex-1"
-            disabled={!typed}
+            disabled={(!typed && !calls) || busy}
             onClick={async () => {
+              setBusy(true);
               try {
-                const r = await sign({ data: { appId, origin, typedData: typed } });
-                reply(origin, { type: "signature", ...r });
+                if (calls) {
+                  const r = await exec({ data: { appId, origin, calls: calls as never } });
+                  reply(origin, { type: "transaction", ...r });
+                } else {
+                  const r = await sign({ data: { appId, origin, typedData: typed } });
+                  reply(origin, { type: "signature", ...r });
+                }
                 window.close();
               } catch (e) {
                 setErr((e as Error).message);
+              } finally {
+                setBusy(false);
               }
             }}
           >
-            Sign
+            {busy ? "Working…" : calls ? "Approve" : "Sign"}
           </Button>
         </div>
       </div>

@@ -4,6 +4,7 @@
  *   const lw = LoopWallet.init({ appId: "APP_ID" });
  *   const { address, session_token } = await lw.login();
  *   const { signature } = await lw.signTypedData(typedData);
+ *   const { transaction_hash } = await lw.execute([{ contractAddress, entrypoint, calldata }]);
  */
 (function () {
   var HUB = (document.currentScript && new URL(document.currentScript.src).origin) || "";
@@ -61,6 +62,17 @@
           var json = await res.json();
           if (!res.ok) throw new Error(json.error || "Login failed");
           return json;
+        },
+        execute: async function (calls) {
+          var url = hub + "/connect/sign?app=" + encodeURIComponent(opts.appId) + "&origin=" + encodeURIComponent(origin);
+          var popup = openPopup(url);
+          return waitFor(popup, function (d) {
+            if (d.type === "ready") {
+              popup.postMessage({ source: "loop-wallet-sdk", type: "execute_request", calls: calls }, hub);
+              return undefined;
+            }
+            return d.type === "transaction" ? d : undefined;
+          });
         },
         signTypedData: async function (typedData) {
           var url = hub + "/connect/sign?app=" + encodeURIComponent(opts.appId) + "&origin=" + encodeURIComponent(origin);
