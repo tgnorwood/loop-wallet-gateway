@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
 import { AppHeader } from "@/components/AppHeader";
 
 export const Route = createFileRoute("/docs")({
@@ -32,7 +33,8 @@ POST /api/public/v1/wallet/sign            { session_token, typed_data }
 Header on every call: X-App-Key: lwk_...`;
 
 function Docs() {
-  const hub = typeof window !== "undefined" ? window.location.origin : "";
+  const [hub, setHub] = useState("https://YOUR-HUB");
+  useEffect(() => setHub(window.location.origin), []);
   return (
     <div className="min-h-screen">
       <AppHeader />
