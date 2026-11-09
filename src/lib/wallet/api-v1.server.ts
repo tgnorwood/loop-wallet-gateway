@@ -350,8 +350,11 @@ export async function dispatchV1(request: Request, path: string): Promise<Respon
 
     return err(404, "NOT_FOUND", `no endpoint ${m} /v1/${path}`);
   } catch (e) {
-    if (e instanceof EngineError) return err(e.status, e.code, e.message, e.details);
-    if (e instanceof ApiError) return err(e.status, e.code.toUpperCase(), e.message);
+    // Duck-typed: module instances can differ under dev reloads, so instanceof is unreliable.
+    const k = e as { status?: unknown; code?: unknown; message?: string; details?: Record<string, unknown> };
+    if (typeof k.status === "number" && typeof k.code === "string") {
+      return err(k.status, e instanceof ApiError ? k.code.toUpperCase() : k.code, k.message, k.details);
+    }
     if (e instanceof Error && /amount must be|decimal places/.test(e.message)) return err(400, "VALIDATION", e.message);
     console.error("v1 error", e);
     return err(500, "SERVER_ERROR", "unexpected error");
