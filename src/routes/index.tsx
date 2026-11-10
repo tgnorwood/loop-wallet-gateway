@@ -1,13 +1,15 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Copy, ShieldCheck, ShieldAlert } from "lucide-react";
 import { AppHeader } from "@/components/AppHeader";
 import { SignInCard } from "@/components/SignInCard";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { useAuth } from "@/hooks/use-auth";
-import { disconnectApp, getPortal, signOutEverywhere } from "@/lib/wallet/portal.functions";
+import { disconnectApp, getPortal, portalSendCode, portalVerifyCode, signOutEverywhere } from "@/lib/wallet/portal.functions";
 
 export const Route = createFileRoute("/")({
   head: () => ({
