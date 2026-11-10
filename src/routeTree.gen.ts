@@ -18,6 +18,7 @@ import { Route as DocsRouteImport } from './routes/docs'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as ConnectSignRouteImport } from './routes/connect.sign'
 import { Route as ApiPublicJobsWalletWorkerRouteImport } from './routes/api/public/jobs/wallet-worker'
+import { Route as ApiPublicMigrateTokensRouteImport } from './routes/api/public/migrate/tokens'
 import { Route as ApiPublicV1SplatRouteImport } from './routes/api/public/v1/$'
 import { Route as ApiPublicMigrateWalletsMigrateRouteImport } from './routes/api/public/migrate/wallets/migrate'
 import { Route as ApiPublicV1OauthTokenRouteImport } from './routes/api/public/v1/oauth/token'
@@ -74,6 +75,11 @@ const ApiPublicJobsWalletWorkerRoute =
     path: '/api/public/jobs/wallet-worker',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiPublicMigrateTokensRoute = ApiPublicMigrateTokensRouteImport.update({
+  id: '/api/public/migrate/tokens',
+  path: '/api/public/migrate/tokens',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiPublicV1SplatRoute = ApiPublicV1SplatRouteImport.update({
   id: '/api/public/v1/$',
   path: '/api/public/v1/$',
@@ -136,6 +142,7 @@ export interface FileRoutesByFullPath {
   '/reset-password': typeof ResetPasswordRoute
   '/connect/sign': typeof ConnectSignRoute
   '/api/public/jobs/wallet-worker': typeof ApiPublicJobsWalletWorkerRoute
+  '/api/public/migrate/tokens': typeof ApiPublicMigrateTokensRoute
   '/api/public/v1/$': typeof ApiPublicV1SplatRoute
   '/api/public/migrate/wallets/migrate': typeof ApiPublicMigrateWalletsMigrateRoute
   '/api/public/v1/oauth/token': typeof ApiPublicV1OauthTokenRoute
@@ -156,6 +163,7 @@ export interface FileRoutesByTo {
   '/reset-password': typeof ResetPasswordRoute
   '/connect/sign': typeof ConnectSignRoute
   '/api/public/jobs/wallet-worker': typeof ApiPublicJobsWalletWorkerRoute
+  '/api/public/migrate/tokens': typeof ApiPublicMigrateTokensRoute
   '/api/public/v1/$': typeof ApiPublicV1SplatRoute
   '/api/public/migrate/wallets/migrate': typeof ApiPublicMigrateWalletsMigrateRoute
   '/api/public/v1/oauth/token': typeof ApiPublicV1OauthTokenRoute
@@ -177,6 +185,7 @@ export interface FileRoutesById {
   '/reset-password': typeof ResetPasswordRoute
   '/connect/sign': typeof ConnectSignRoute
   '/api/public/jobs/wallet-worker': typeof ApiPublicJobsWalletWorkerRoute
+  '/api/public/migrate/tokens': typeof ApiPublicMigrateTokensRoute
   '/api/public/v1/$': typeof ApiPublicV1SplatRoute
   '/api/public/migrate/wallets/migrate': typeof ApiPublicMigrateWalletsMigrateRoute
   '/api/public/v1/oauth/token': typeof ApiPublicV1OauthTokenRoute
@@ -199,6 +208,7 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/connect/sign'
     | '/api/public/jobs/wallet-worker'
+    | '/api/public/migrate/tokens'
     | '/api/public/v1/$'
     | '/api/public/migrate/wallets/migrate'
     | '/api/public/v1/oauth/token'
@@ -219,6 +229,7 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/connect/sign'
     | '/api/public/jobs/wallet-worker'
+    | '/api/public/migrate/tokens'
     | '/api/public/v1/$'
     | '/api/public/migrate/wallets/migrate'
     | '/api/public/v1/oauth/token'
@@ -239,6 +250,7 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/connect/sign'
     | '/api/public/jobs/wallet-worker'
+    | '/api/public/migrate/tokens'
     | '/api/public/v1/$'
     | '/api/public/migrate/wallets/migrate'
     | '/api/public/v1/oauth/token'
@@ -259,6 +271,7 @@ export interface RootRouteChildren {
   DocsRoute: typeof DocsRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
   ApiPublicJobsWalletWorkerRoute: typeof ApiPublicJobsWalletWorkerRoute
+  ApiPublicMigrateTokensRoute: typeof ApiPublicMigrateTokensRoute
   ApiPublicV1SplatRoute: typeof ApiPublicV1SplatRoute
   ApiPublicMigrateWalletsMigrateRoute: typeof ApiPublicMigrateWalletsMigrateRoute
   ApiPublicV1OauthTokenRoute: typeof ApiPublicV1OauthTokenRoute
@@ -333,6 +346,13 @@ declare module '@tanstack/react-router' {
       path: '/api/public/jobs/wallet-worker'
       fullPath: '/api/public/jobs/wallet-worker'
       preLoaderRoute: typeof ApiPublicJobsWalletWorkerRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/public/migrate/tokens': {
+      id: '/api/public/migrate/tokens'
+      path: '/api/public/migrate/tokens'
+      fullPath: '/api/public/migrate/tokens'
+      preLoaderRoute: typeof ApiPublicMigrateTokensRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/public/v1/$': {
@@ -421,6 +441,7 @@ const rootRouteChildren: RootRouteChildren = {
   DocsRoute: DocsRoute,
   ResetPasswordRoute: ResetPasswordRoute,
   ApiPublicJobsWalletWorkerRoute: ApiPublicJobsWalletWorkerRoute,
+  ApiPublicMigrateTokensRoute: ApiPublicMigrateTokensRoute,
   ApiPublicV1SplatRoute: ApiPublicV1SplatRoute,
   ApiPublicMigrateWalletsMigrateRoute: ApiPublicMigrateWalletsMigrateRoute,
   ApiPublicV1OauthTokenRoute: ApiPublicV1OauthTokenRoute,
