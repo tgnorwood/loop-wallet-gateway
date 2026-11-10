@@ -29,6 +29,13 @@
       "when": 1794284168061,
       "tag": "0003_token_chain_history",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1794287749849,
+      "tag": "0004_wallet_email_linking",
+      "breakpoints": true
     }
   ]
 }
