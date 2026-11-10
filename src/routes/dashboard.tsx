@@ -11,7 +11,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuth } from "@/hooks/use-auth";
-import { fromBaseUnits } from "@/lib/wallet/chain-rules";
+import { fromBaseUnits, publicTransactionStatus } from "@/lib/wallet/chain-rules";
 import { adminImport, adminMarkTest, adminResyncToken, adminTokenHistory, adminUpdateAppChain, chainDashboard } from "@/lib/wallet/chain-admin.functions";
 
 export const Route = createFileRoute("/dashboard")({
@@ -114,7 +114,7 @@ function Dashboard() {
               <span className="font-medium">{t.type}</span>
               <span className="text-muted-foreground">{appName(t.app_id)}{t.error_code ? ` · ${t.error_code}: ${t.error_message ?? ""}` : ""}</span>
               <span className="flex items-center gap-2">
-                <span className={t.status === "failed" ? "text-destructive" : t.status === "confirmed" ? "text-primary" : "text-muted-foreground"}>{t.status}</span>
+                <span className={t.status === "failed" ? "text-destructive" : t.status === "confirmed" ? "text-primary" : "text-muted-foreground"}>{publicTransactionStatus(t.status, t.error_code)}</span>
                 {t.tx_hash && <a className="underline" href={voyager("tx", t.tx_hash)} target="_blank" rel="noreferrer">view</a>}
               </span>
             </div>
