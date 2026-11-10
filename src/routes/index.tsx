@@ -8,6 +8,7 @@ import { AppHeader } from "@/components/AppHeader";
 import { SignInCard } from "@/components/SignInCard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { fromBaseUnits } from "@/lib/wallet/chain-rules";
 import { useAuth } from "@/hooks/use-auth";
 import { disconnectApp, getPortal, portalSendCode, portalVerifyCode, signOutEverywhere } from "@/lib/wallet/portal.functions";
 
@@ -92,7 +93,17 @@ function Dashboard() {
       </section>
 
       <div className="grid gap-6 md:grid-cols-2">
-        <Panel title="Collectibles & points">
+        <Panel title="Tokens">
+          {data.tokens.length === 0 ? <Empty>No tokens yet.</Empty> : data.tokens.map((t) => (
+            <Row key={t.symbol + t.address} left={`${t.name} (${t.symbol})`} right={fromBaseUnits(BigInt(t.balance.split(".")[0]!), t.decimals)} />
+          ))}
+        </Panel>
+        <Panel title="NFTs">
+          {data.nfts.length === 0 ? <Empty>No NFTs yet.</Empty> : data.nfts.map((n) => (
+            <Row key={n.id} left={n.collection} right={`#${n.tokenId}`} />
+          ))}
+        </Panel>
+        <Panel title="Points & badges">
           {data.assets.items.length === 0 ? <Empty>Nothing yet. Apps you use can add points and badges here.</Empty> : data.assets.items.map((i, k) => (
             <Row key={k} left={i.name} right={`${i.amount} ${i.kind}`} />
           ))}
