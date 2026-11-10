@@ -105,20 +105,49 @@ function walletDto(w: { id: string; external_id: string | null; kind: string; la
 }
 
 // ------------------------------------------------------------------ handlers
+async function linkToApp(ctx: Ctx, externalId: string, walletId: string, how: string) {
+  await db.from("wallet_app_links").upsert({ app_id: ctx.app.id, network: ctx.network, external_id: externalId, wallet_id: walletId });
+  await audit({ app_id: ctx.app.id, wallet_id: walletId, action: "wallet_linked_by_email", ip: ctx.ip, details: { external_id: externalId, how } });
+  const { data: w } = await db.from("wallets").select("*").eq("id", walletId).single();
+  return { ...walletDto(w!), externalId, reused: true };
+}
+
+async function verifyWalletLink(ctx: Ctx) {
+  const b = parse(z.object({ verificationId: z.string().uuid(), code: z.string().regex(/^\d{6}$/) }), ctx.body);
+  const { checkEmailProof } = await import("./service.server");
+  try {
+    const v = await checkEmailProof({ id: b.verificationId, purpose: "app_link", appId: ctx.app.id }, b.code, ctx.ip);
+    return json(await linkToApp({ ...ctx, network: v.network ?? ctx.network }, v.external_id!, v.wallet_id, "email_code"), 200);
+  } catch (e) {
+    const ae = e as { status?: number; code?: string; message: string; extra?: Record<string, unknown> };
+    return json({ error: { code: ae.code === "invalid_code" ? "INVALID_CODE" : (ae.code ?? "VALIDATION").toUpperCase(), message: ae.message, ...(ae.extra ?? {}) } }, ae.status ?? 400);
+  }
+}
+
 async function createWallet(ctx: Ctx) {
-  const b = parse(z.object({ externalId: str(200), kind: z.enum(["user", "collection_owner", "treasury"]).default("user"), label: z.string().max(200).optional(), email: z.string().email().max(254).optional(), emailVerified: z.boolean().optional() }), ctx.body);
+  const b = parse(z.object({ externalId: str(200), kind: z.enum(["user", "collection_owner", "treasury"]).default("user"), label: z.string().max(200).optional(), email: z.string().email().max(254).optional(), emailVerified: z.boolean().optional(), signInMethod: z.enum(["google", "password", "other"]).optional() }), ctx.body);
   const { data: linkRow } = await db.from("wallet_app_links").select("wallet_id").eq("app_id", ctx.app.id).eq("network", ctx.network).eq("external_id", b.externalId).maybeSingle();
   if (linkRow) { const { data: lw } = await db.from("wallets").select("*").eq("id", linkRow.wallet_id).single(); return json({ ...walletDto(lw!), externalId: b.externalId, reused: true }, 200); }
   const { data: existing } = await db.from("wallets").select("*").eq("app_id", ctx.app.id).eq("network", ctx.network).eq("external_id", b.externalId).maybeSingle();
   if (existing) return json(walletDto(existing), 200);
-  // Same verified email = same wallet across apps: link this app's user to the existing wallet instead of making a new one.
-  if (b.email && b.emailVerified && b.kind === "user") {
+  // Same email = same wallet across apps, but only after proof: an emailed code, unless the user came via Google and the admin trusts this app for Google.
+  if (b.email && b.kind === "user") {
     const em = b.email.toLowerCase();
     const { data: same } = await db.from("wallets").select("*").eq("network", ctx.network).is("retired_at", null).or(`email.eq.${em},retired_email.eq.${em}`).limit(1).maybeSingle();
     if (same) {
-      await db.from("wallet_app_links").insert({ app_id: ctx.app.id, network: ctx.network, external_id: b.externalId, wallet_id: same.id });
-      await audit({ app_id: ctx.app.id, wallet_id: same.id, action: "wallet_linked_by_email", ip: ctx.ip, details: { external_id: b.externalId } });
-      return json({ ...walletDto(same), externalId: b.externalId, reused: true }, 200);
+      const { needsEmailProof } = await import("./rules");
+      const method = b.signInMethod ?? "other";
+      if (needsEmailProof({ walletExists: true, alreadyLinked: false, method, appTrustedGoogle: !!(ctx.app as { trusted_oauth?: boolean }).trusted_oauth })) {
+        const { startEmailProof } = await import("./service.server");
+        try {
+          const verificationId = await startEmailProof(same.id, { purpose: "app_link", appId: ctx.app.id, externalId: b.externalId, network: ctx.network }, ctx.ip);
+          return json({ status: "verification_required", verificationId, message: "A 6-digit code was emailed. Send it to POST /v1/wallets/verify." }, 202);
+        } catch (e) {
+          const ae = e as { status?: number; code?: string; message: string };
+          return err(ae.status ?? 400, ae.code === "resend_cooldown" ? "RATE_LIMITED" : "VALIDATION", ae.message);
+        }
+      }
+      return json(await linkToApp(ctx, b.externalId, same.id, "google"), 200);
     }
   }
   const key = process.env["WALLET_ENCRYPTION_KEY"];
@@ -210,7 +239,7 @@ export async function dispatchV1(request: Request, path: string): Promise<Respon
     delete body["network"];
     const ip = request.headers.get("cf-connecting-ip") ?? request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null;
     const ctx: Ctx = { app, req: request, url, body, network, idem: request.headers.get("idempotency-key"), ip };
-    if (["POST", "PATCH", "DELETE"].includes(m) && !ctx.idem && path !== "wallets") return err(400, "VALIDATION", "Idempotency-Key header is required");
+    if (["POST", "PATCH", "DELETE"].includes(m) && !ctx.idem && path !== "wallets" && path !== "wallets/verify") return err(400, "VALIDATION", "Idempotency-Key header is required");
     await audit({ app_id: app.id, action: "api_call", method: `${m} /v1/${path}`.slice(0, 120), ip });
 
     const seg = path.split("/").filter(Boolean);
@@ -219,6 +248,7 @@ export async function dispatchV1(request: Request, path: string): Promise<Respon
 
     // wallets
     if (a === "wallets" && !id && m === "POST") return await createWallet(ctx);
+    if (a === "wallets" && id === "verify" && !b && m === "POST") return await verifyWalletLink(ctx);
     if (a === "wallets" && !id && m === "GET") {
       const ext = url.searchParams.get("externalId");
       let q = db.from("wallets").select("*").eq("app_id", app.id).eq("network", network).order("created_at", { ascending: false }).limit(100);
