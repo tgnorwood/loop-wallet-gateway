@@ -88,12 +88,13 @@ function Dashboard() {
         <Stat label="Operator queue" value={s.operatorQueue} hint={s.operatorQueue ? `about ${Math.ceil(s.operatorWaitSeconds / 60)} min to clear` : "clear"} />
         <Stat label="Confirmed (24h)" value={s.confirmed24h} />
         <Stat label="Failed (24h)" value={s.failed24h} hint={s.pendingWebhooks ? `${s.pendingWebhooks} app notifications waiting` : undefined} />
-        <Stat label="Loop Do wallets moved in" value={s.loopDoImported} hint={s.loopDoImported ? `${s.loopDoLegacy} old type (not gas-free) · last ${new Date(s.loopDoLastAt!).toLocaleString()}` : "not started"} />
+        <Stat label="Loop Do wallets moved in" value={s.loopDoImported} hint={s.loopDoImported && s.loopDoLastAt ? `${s.loopDoLegacy} old type (not gas-free) · last ${new Date(s.loopDoLastAt).toLocaleString()}` : "not started"} />
       </div>
 
       <Tabs defaultValue="log">
-        <TabsList>
+        <TabsList className="h-auto flex-wrap justify-start">
           <TabsTrigger value="log">Activity log</TabsTrigger>
+          <TabsTrigger value="transfers">Transfers</TabsTrigger>
           <TabsTrigger value="tokens">Tokens</TabsTrigger>
           <TabsTrigger value="collections">Collections</TabsTrigger>
           <TabsTrigger value="apps">Apps</TabsTrigger>
@@ -120,6 +121,9 @@ function Dashboard() {
           ))}
         </TabsContent>
 
+        <TabsContent value="transfers">
+          <TokenHistory tokens={data.tokens} />
+        </TabsContent>
         <TabsContent value="tokens" className="rounded-xl border bg-card p-4">
           <ItemList kind="token" items={data.tokens} appName={appName} />
           <TokenHistory tokens={data.tokens} />
@@ -168,44 +172,48 @@ function TokenHistory({ tokens }: { tokens: TokRow[] }) {
   const load = useServerFn(adminTokenHistory);
   const resync = useServerFn(adminResyncToken);
   const qc = useQueryClient();
-  const sel = synced.find((t) => t.id === id);
-  const { data } = useQuery({ queryKey: ["tok-hist", id], queryFn: () => load({ data: { tokenId: id } }), enabled: !!id, refetchInterval: 15_000 });
+  const sel = synced.find((t) => t.id === id) ?? [...synced].sort((a, b) => b.event_count - a.event_count)[0];
+  const selectedId = sel?.id ?? "";
+  const { data, isLoading, error } = useQuery({ queryKey: ["tok-hist", selectedId], queryFn: () => load({ data: { tokenId: selectedId } }), enabled: !!selectedId, refetchInterval: 15_000 });
   return (
     <section className="mt-6 space-y-3 border-t pt-4">
       <h3 className="font-semibold">Holders and history (from Starknet)</h3>
       {!synced.length ? <p className="text-sm text-muted-foreground">No imported tokens yet. Once Loop Do sends its token list, each token's holders and transfers are read from the chain here.</p> : (
         <>
-          <select className="h-9 rounded-md border bg-background px-2 text-sm" value={id} onChange={(e) => setId(e.target.value)}>
-            <option value="">Choose a token…</option>
-            {synced.map((t) => <option key={t.id} value={t.id}>{t.name} ({t.symbol}) · {t.holder_count} holders</option>)}
+          <select aria-label="Token transfer history" className="h-9 w-full max-w-xl rounded-md border bg-background px-2 text-sm" value={selectedId} onChange={(e) => setId(e.target.value)}>
+            {synced.map((t) => <option key={t.id} value={t.id}>{t.name} ({t.symbol}) · {t.holder_count} holders · {t.event_count} transfers</option>)}
           </select>
           {sel && (
             <div className="space-y-3 text-sm">
               <p className="text-muted-foreground">
                 {sel.creator_ref ? `Created by ${sel.creator_ref} · ` : ""}Supply {amt(String(sel.total_supply ?? "0"))} · {sel.holder_count} holders · {sel.event_count} transfers ·{" "}
-                {sel.sync_error ? <span className="text-destructive">sync problem: {sel.sync_error}</span> : sel.synced_block != null ? `up to date to block ${sel.synced_block}` : "reading history…"}
+                {sel.sync_error ? <span className="text-destructive">sync problem: {sel.sync_error}</span> : sel.synced_block != null ? `History read through block ${sel.synced_block}` : "reading history…"}
               </p>
-              <Button size="sm" variant="outline" onClick={async () => { await resync({ data: { tokenId: sel.id } }); qc.invalidateQueries({ queryKey: ["chain-dash"] }); qc.invalidateQueries({ queryKey: ["tok-hist", id] }); toast.success("Re-reading from chain"); }}>Re-sync from chain</Button>
-              <div className="grid gap-4 lg:grid-cols-2">
-                <div>
+              <Button size="sm" variant="outline" onClick={async () => { try { await resync({ data: { tokenId: sel.id } }); qc.invalidateQueries({ queryKey: ["chain-dash"] }); qc.invalidateQueries({ queryKey: ["tok-hist", selectedId] }); toast.success("Re-reading from chain"); } catch { toast.error("Could not re-sync this token. Please try again."); } }}>Re-sync from chain</Button>
+              {isLoading && <p className="text-muted-foreground">Loading holders and transfers…</p>}
+              {error && <p className="text-destructive">Could not load holders and transfers. <Button size="sm" variant="outline" onClick={() => qc.invalidateQueries({ queryKey: ["tok-hist", selectedId] })}>Retry</Button></p>}
+              {data && <div className="grid gap-4 lg:grid-cols-2">
+                <div className="min-w-0">
                   <p className="mb-1 font-medium">Holders</p>
+                  {!data.holders.length && <p className="text-muted-foreground">No holders recorded yet.</p>}
                   {data?.holders.map((h) => (
                     <div key={h.address} className="flex justify-between gap-2 border-t py-1">
-                      <a className="font-mono text-xs underline" href={voyager("contract", h.address)} target="_blank" rel="noreferrer">{h.who || short(h.address)}</a>
-                      <span>{amt(h.balance)}</span>
+                      <a className="min-w-0 break-all font-mono text-xs underline" href={voyager("contract", h.address)} target="_blank" rel="noreferrer">{h.who || short(h.address)}</a>
+                      <span className="shrink-0">{amt(h.balance)}</span>
                     </div>
                   ))}
                 </div>
-                <div>
-                  <p className="mb-1 font-medium">Transfers</p>
-                  {data?.events.map((e) => (
-                    <div key={e.tx_hash + e.from_address + e.to_address} className="flex justify-between gap-2 border-t py-1 text-xs">
-                      <span>{/^0x0+$/.test(e.from_address) ? "minted" : e.fromWho || short(e.from_address)} → {e.toWho || short(e.to_address)}</span>
-                      <span className="flex gap-2">{amt(e.amount)} <a className="underline" href={voyager("tx", e.tx_hash)} target="_blank" rel="noreferrer">#{e.block_number}</a></span>
+                <div className="min-w-0">
+                  <p className="mb-1 font-medium">Transfers · latest {data.events.length}</p>
+                  {!data.events.length && <p className="text-muted-foreground">No transfers recorded yet.</p>}
+                  {data.events.map((e, index) => (
+                    <div key={`${e.tx_hash}-${index}`} className="flex flex-wrap justify-between gap-2 border-t py-2 text-xs">
+                      <span className="min-w-0 break-all">{/^0x0+$/.test(e.from_address) ? "minted" : e.fromWho || short(e.from_address)} → {/^0x0+$/.test(e.to_address) ? "burned" : e.toWho || short(e.to_address)}</span>
+                      <span className="flex shrink-0 gap-2">{amt(e.amount)} <a className="underline" href={voyager("tx", e.tx_hash)} target="_blank" rel="noreferrer">#{e.block_number}</a></span>
                     </div>
                   ))}
                 </div>
-              </div>
+              </div>}
             </div>
           )}
         </>
