@@ -611,6 +611,45 @@ export type Database = {
         }
         Relationships: []
       }
+      wallet_app_links: {
+        Row: {
+          app_id: string
+          created_at: string
+          external_id: string
+          network: string
+          wallet_id: string
+        }
+        Insert: {
+          app_id: string
+          created_at?: string
+          external_id: string
+          network?: string
+          wallet_id: string
+        }
+        Update: {
+          app_id?: string
+          created_at?: string
+          external_id?: string
+          network?: string
+          wallet_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "wallet_app_links_app_id_fkey"
+            columns: ["app_id"]
+            isOneToOne: false
+            referencedRelation: "registered_apps"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "wallet_app_links_wallet_id_fkey"
+            columns: ["wallet_id"]
+            isOneToOne: false
+            referencedRelation: "wallets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       wallet_sessions: {
         Row: {
           app_id: string | null
