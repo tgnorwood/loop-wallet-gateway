@@ -189,7 +189,8 @@ export async function relay(network: string, action: string, body: Record<string
   } catch (err) {
     const e = err instanceof Error ? err : new Error(String(err));
     console.error("relay_error", { requestId, action, elapsedMs: Date.now() - started, name: e.name, message: safe(e.message), code: (e as { code?: string }).code ?? null });
-    if (e.name === "TimeoutError" || e.name === "AbortError" || e instanceof TypeError) throw Object.assign(e, { code: "SUBMISSION_UNKNOWN" });
+    const originalName = err && typeof err === "object" && "name" in err ? String(err.name) : e.name;
+    if (originalName === "TimeoutError" || originalName === "AbortError" || e instanceof TypeError) throw Object.assign(e, { code: "SUBMISSION_UNKNOWN" });
     throw e;
   }
 }
