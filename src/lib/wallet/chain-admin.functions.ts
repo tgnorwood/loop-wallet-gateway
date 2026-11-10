@@ -154,3 +154,27 @@ export const adminResyncToken = createServerFn({ method: "POST" })
     const { syncTokens } = await import("./token-sync.server");
     return syncTokens(20_000);
   });
+
+export const adminLinkImportedWallet = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: { email: string; address: string; confirm?: boolean }) =>
+    z.object({ email: z.string().email().max(254), address: z.string().regex(/^0x[0-9a-fA-F]{1,64}$/), confirm: z.boolean().optional() }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.supabase, context.userId);
+    const { supabaseAdmin: db } = await import("@/integrations/supabase/client.server");
+    const email = data.email.trim().toLowerCase();
+    const want = BigInt(data.address);
+    const { data: cands } = await db.from("wallets").select("id,address,external_id,user_id,imported_from").like("imported_from", "loop-do%").ilike("address", `%${want.toString(16).slice(-12)}`);
+    const imp = (cands ?? []).find((w) => BigInt(w.address) === want);
+    if (!imp) return { ok: false as const, error: "No moved-in Loop Do wallet has that address." };
+    if (imp.user_id) return { ok: false as const, error: "That wallet is already linked to an account." };
+    const { data: users } = await db.auth.admin.listUsers({ perPage: 1000 });
+    const user = users?.users.find((u) => u.email?.toLowerCase() === email);
+    if (!user) return { ok: false as const, error: "No hub account uses that email." };
+    if (!data.confirm) return { ok: true as const, preview: true, loopDoUserId: imp.external_id, address: imp.address };
+    try {
+      const { claimImportedWallet } = await import("./service.server");
+      const w = await claimImportedWallet(user.id, email, imp.id, "admin_link", context.userId);
+      return { ok: true as const, preview: false, loopDoUserId: imp.external_id, address: w.address };
+    } catch (e) { return { ok: false as const, error: (e as Error).message }; }
+  });
