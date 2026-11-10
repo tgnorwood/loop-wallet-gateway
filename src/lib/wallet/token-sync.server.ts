@@ -34,7 +34,7 @@ export async function syncTokens(budgetMs = 15_000) {
         filter: { from_block: { block_number: from }, to_block: { block_number: target }, address: pad(t.address!), keys: [[SEL]], chunk_size: 500, ...(t.sync_continuation ? { continuation_token: t.sync_continuation } : {}) },
       });
       pages++;
-      const rows = parseTransferEvents(res.events).map((e) => ({ ...e, token_id: t.id }));
+      const rows = parseTransferEvents(res.events).map((e) => ({ ...e, amount: e.amount as unknown as number, token_id: t.id }));
       if (rows.length) {
         const { error } = await db.from("chain_events").upsert(rows, { onConflict: "token_id,tx_hash,ordinal", ignoreDuplicates: true });
         if (error) throw error;
@@ -55,7 +55,7 @@ export async function syncTokens(budgetMs = 15_000) {
   return { pages, events };
 }
 
-type PushedToken = { address: string; name: string; symbol: string; creator_user_id?: string; creator_email?: string; swappable?: boolean };
+type PushedToken = { address: string; name: string; symbol: string; creator_user_id?: string | undefined; creator_email?: string | undefined; swappable?: boolean | undefined };
 /** Loop Do pushes its token list; each is registered under the "Loop Do" app and queued for chain backfill. */
 export async function receiveLoopDoTokens(tokens: PushedToken[], dryRun: boolean) {
   const { data: app } = await db.from("registered_apps").select("id").ilike("name", "loop do").is("revoked_at", null).order("created_at").limit(1).maybeSingle();
