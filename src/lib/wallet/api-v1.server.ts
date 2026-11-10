@@ -6,7 +6,7 @@ import { appFromKey, audit, rateLimit, ApiError } from "./service.server";
 import { EngineError, enqueue, getTx, tick, txDto, waitForTx, type TxRow } from "./engine.server";
 import { encryptSecret } from "./crypto";
 import { generateWallet } from "./starknet";
-import { canRemoveMinter, capExceeded, fromBaseUnits, kindAllowed, sameAddress, signerKeyOperator, signerKeyWallet, toBaseUnits } from "./chain-rules";
+import { canRemoveMinter, capExceeded, fromBaseUnits, kindAllowed, sameAddress, signerKeyOperator, signerKeyWallet, swapPairAllowed, toBaseUnits } from "./chain-rules";
 
 const db = supabaseAdmin;
 type App = Awaited<ReturnType<typeof appFromKey>> & { mainnet_enabled?: boolean; daily_mint_cap?: number | null; daily_distribute_cap?: number | null; rate_limit_per_min?: number };
@@ -260,7 +260,7 @@ export async function dispatchV1(request: Request, path: string): Promise<Respon
       const v = parse(z.object({ walletId: uuid, fromTokenId: uuid, toTokenId: uuid, amount }), body);
       if (v.fromTokenId === v.toTokenId) throw new EngineError(400, "VALIDATION", "cannot swap a token to itself");
       const [w, f, t] = [await walletOf(ctx, v.walletId), await tokenOf(ctx, v.fromTokenId), await tokenOf(ctx, v.toTokenId)];
-      if (!f.swappable || !t.swappable) throw new EngineError(403, "SWAP_NOT_ALLOWED", "both tokens must be marked swappable");
+      if (!swapPairAllowed(app.name, f.swappable, t.swappable)) throw new EngineError(403, "SWAP_NOT_ALLOWED", "both tokens must be marked swappable");
       if (!kindAllowed(w.kind, "movement")) throw new EngineError(403, "VALIDATION", "this wallet kind cannot move tokens");
       return await queue(ctx, "swap", signerKeyWallet(w.id), w.id, v, { fromToken: f.address, toToken: t.address, amountRaw: toBaseUnits(v.amount).toString() });
     }

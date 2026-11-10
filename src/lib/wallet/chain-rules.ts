@@ -19,6 +19,11 @@ export function fromBaseUnits(raw: string | bigint, decimals = 18) {
 export const signerKeyOperator = (network: string) => `operator:${network}`;
 export const signerKeyWallet = (walletId: string) => `wallet:${walletId}`;
 
+/** Loop Do may request any of its token pairs; other apps opt in per token. */
+export function swapPairAllowed(appName: string, fromSwappable: boolean, toSwappable: boolean) {
+  return appName.trim().toLowerCase() === "loop do" || (fromSwappable && toSwappable);
+}
+
 /** Stable JSON so the same request always hashes the same for idempotency checks. */
 export function stableJson(v: unknown): string {
   if (Array.isArray(v)) return `[${v.map(stableJson).join(",")}]`;
