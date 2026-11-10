@@ -71,7 +71,7 @@ describe("reading created addresses from events", () => {
   });
 });
 
-import { parseTransportKey, decryptPushedKey, isGasFreeClass, mapChainError, normAddress } from "@/lib/wallet/chain-rules";
+import { parseTransportKey, decryptPushedKey, isGasFreeClass, normAddress } from "@/lib/wallet/chain-rules";
 describe("Loop Do push migration", () => {
   const keyHex = "11".repeat(32);
   const addr = "0x0" + "abc".repeat(10);
