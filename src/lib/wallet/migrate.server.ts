@@ -87,7 +87,7 @@ export async function importTokens(p: { appId: string; rows: { address: string; 
 // Loop Do encrypts each Stark key with the shared transport key WALLET_MASTER_KEY (AES-256-GCM,
 // address as AAD). We decrypt, check the key owns the address under the stated class, then
 // re-encrypt with our own storage key. The transport key is never used for storage.
-type PushedWallet = { user_id: string; address: string; class_hash: string; encrypted_private_key: { iv: string; ciphertext: string } };
+type PushedWallet = { user_id: string; address: string; class_hash: string; encrypted_private_key: { iv: string; ciphertext: string }; email?: string; email_verified?: boolean };
 const pad = (a: string) => "0x" + BigInt(a).toString(16).padStart(64, "0");
 
 export async function receiveLoopDoWallets(wallets: PushedWallet[]) {
@@ -132,6 +132,14 @@ export async function receiveLoopDoWallets(wallets: PushedWallet[]) {
     const { error } = await db.from("wallets").insert(chunk as never);
     if (error) { for (const r of res) out.push({ ...r, status: "error", note: error.message.slice(0, 200) }); continue; }
     out.push(...res);
+  }
+  // Verified emails sent with the wallets are linked the same way as the separate emails endpoint.
+  const withEmail = valid.filter((w) => w.email_verified === true && typeof w.email === "string" && /^[^@\s]+@[^@\s]+$/.test(w.email));
+  if (withEmail.length) {
+    const { attachLoopDoEmails } = await import("./service.server");
+    const linked = await attachLoopDoEmails(withEmail.map((w) => ({ user_id: String(w.user_id), address: pad(w.address), email: w.email!, email_verified: true })), false);
+    const byId = new Map(linked.map((l) => [l.user_id, l.status]));
+    for (const r of out) { const st = byId.get(r.externalId); if (st) (r as ImportResult & { email_status?: string }).email_status = st; }
   }
   const created = out.filter((r) => r.status === "created");
   await audit({ app_id: app.id, action: "wallet_imported", details: { source: "loop-do-push", received: wallets.length, created: created.length, legacy: created.filter((r) => r.note).length } });
