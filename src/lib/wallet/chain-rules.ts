@@ -78,6 +78,16 @@ export const backoffMs = (attempt: number) => Math.min(60_000 * 2 ** (attempt - 
 export const webhookBackoffMs = (attempt: number) => Math.min(30_000 * 2 ** attempt, 6 * 3600_000);
 export const WEBHOOK_MAX_AGE_MS = 24 * 3600_000;
 
+/** A lost submission reply is not evidence of failure and must never be retried blindly. */
+export function submissionNeedsReconciliation(code: string | undefined, retryable: boolean) {
+  return code === "SUBMISSION_UNKNOWN" || retryable;
+}
+
+export function publicTransactionStatus(status: string, errorCode: string | null) {
+  if ((status === "processing" || status === "submitted") && errorCode === "SUBMISSION_UNKNOWN") return "unknown";
+  return status === "processing" ? "queued" : status;
+}
+
 export function capExceeded(usedRaw: bigint, requestRaw: bigint, capHuman: string | number | null | undefined) {
   if (capHuman === null || capHuman === undefined || capHuman === "") return false;
   return usedRaw + requestRaw > toBaseUnits(String(capHuman));

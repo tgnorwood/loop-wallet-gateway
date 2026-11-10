@@ -156,26 +156,42 @@ export function readers(network: string) {
 }
 
 /** Operator actions go through the Token Factory relay (one at a time, shared operator nonce). */
-export async function relay(network: string, action: string, body: Record<string, unknown>) {
+export async function relay(network: string, action: string, body: Record<string, unknown>, requestId?: string) {
   const key = process.env["RELAY_API_KEY"];
   if (!key) throw Object.assign(new Error("RELAY_API_KEY is not configured"), { code: "RELAY_NOT_CONFIGURED" });
   const c = cfg(network);
-  const full: Record<string, unknown> = { network, sponsorGas: true, ...body };
+  const full: Record<string, unknown> = { network, sponsorGas: true, ...body, wait: false };
   if (action.startsWith("nft/create-collection")) full["factoryAddress"] = c.nftFactory;
   else if (!action.startsWith("nft/")) full["factoryAddress"] = c.tokenFactory;
+  const started = Date.now();
+  // Only response/error bodies are logged, never outbound headers or signing keys.
+  const safe = (value: string) => value.split(key).join("[REDACTED]").replace(/("(?:[^"\\]*(?:secret|private_key|privateKey|api_key|apiKey|authorization)[^"\\]*)"\s*:\s*)"[^"]*"/gi, '$1"[REDACTED]"').slice(0, 12000);
+  try {
   const res = await fetch(`${BASE_URL}/api/relay/${action}`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-relay-api-key": key },
     body: JSON.stringify(full),
+    signal: AbortSignal.timeout(20_000),
   });
   const txt = await res.text();
+  console.info("relay_response", { requestId, action, httpStatus: res.status, elapsedMs: Date.now() - started, body: safe(txt) });
   let data: Record<string, unknown> = {};
   try { data = JSON.parse(txt); } catch { /* non-JSON */ }
   if (!res.ok || !data["ok"]) {
     const e = Object.assign(new Error(String(data["error"] ?? `relay ${action} failed (${res.status})`)), { status: res.status });
+    if (res.status >= 500 || res.ok && !data["ok"]) throw Object.assign(e, { code: "SUBMISSION_UNKNOWN" });
     throw readableError(e);
   }
+  const txHash = data["transactionHash"] ?? data["txHash"] ?? data["transaction_hash"];
+  if (typeof txHash !== "string" || !/^0x[0-9a-f]+$/i.test(txHash)) throw Object.assign(new Error("Relay reply has no valid transaction hash; check the chain before retrying"), { code: "SUBMISSION_UNKNOWN" });
+  data["transactionHash"] = txHash;
   return data;
+  } catch (err) {
+    const e = err instanceof Error ? err : new Error(String(err));
+    console.error("relay_error", { requestId, action, elapsedMs: Date.now() - started, name: e.name, message: safe(e.message), code: (e as { code?: string }).code ?? null });
+    if (e.name === "TimeoutError" || e.name === "AbortError" || e instanceof TypeError) throw Object.assign(e, { code: "SUBMISSION_UNKNOWN" });
+    throw e;
+  }
 }
 
 /** Pull a created address out of a factory event: keys[0]=selector, keys[1]=new contract. */

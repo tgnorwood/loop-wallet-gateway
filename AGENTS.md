@@ -30,6 +30,7 @@ use the editor.
 <!-- LOVABLE:END -->
 
 ## Project rules
+- Relay calls request wait:false and log redacted replies by transaction ID; uncertain submissions retain their signer lock and never auto-resend, while known hashes are receipt-polled.
 - API exchange eligibility is evaluated by the pure swapPairAllowed rule after app-scoped token reads, so app policy never bypasses ownership checks.
 - Wallet logic lives in `src/lib/wallet/`; DB-touching code is `service.server.ts`, loaded only via dynamic import inside handlers, so the service-role client never reaches the browser.
 - Pure rules (OTP limits, session validity, origin matching) live in `rules.ts` so they can be unit-tested without a database.

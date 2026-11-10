@@ -12,6 +12,8 @@ import {
   idempotencyDecision,
   mapChainError,
   stableJson,
+  submissionNeedsReconciliation,
+  publicTransactionStatus,
   webhookBackoffMs,
 } from "./chain-rules";
 
@@ -42,7 +44,7 @@ export function txDto(t: TxRow) {
   return {
     id: t.id,
     type: t.type,
-    status: t.status === "processing" ? "queued" : t.status,
+    status: publicTransactionStatus(t.status, t.error_code),
     network: t.network,
     request: pub,
     txHash: t.tx_hash,
@@ -108,14 +110,14 @@ async function execute(t: TxRow) {
   if (t.signer_key.startsWith("operator:")) {
     let out: Record<string, unknown> = {};
     switch (t.type) {
-      case "token.create": out = await core.relay(net, "create-token", { name: r["name"], symbol: r["symbol"], initialSupply: r["amountRaw"] }); break;
-      case "token.mint": out = await core.relay(net, "mint-more", { token: r["token"], amount: r["amountRaw"] }); break;
-      case "token.distribute": out = await core.relay(net, "distribute", { token: r["token"], to: r["to"], amount: r["amountRaw"] }); break;
+      case "token.create": out = await core.relay(net, "create-token", { name: r["name"], symbol: r["symbol"], initialSupply: r["amountRaw"] }, t.id); break;
+      case "token.mint": out = await core.relay(net, "mint-more", { token: r["token"], amount: r["amountRaw"] }, t.id); break;
+      case "token.distribute": out = await core.relay(net, "distribute", { token: r["token"], to: r["to"], amount: r["amountRaw"] }, t.id); break;
       case "collection.create":
-        out = await core.relay(net, "nft/create-collection", { creator: r["creator"], name: r["name"], symbol: r["symbol"], royaltyReceiver: r["royaltyReceiver"], royaltyBps: Number(r["royaltyBps"] ?? 0) });
+        out = await core.relay(net, "nft/create-collection", { creator: r["creator"], name: r["name"], symbol: r["symbol"], royaltyReceiver: r["royaltyReceiver"], royaltyBps: Number(r["royaltyBps"] ?? 0) }, t.id);
         break;
       case "nft.mint":
-        out = await core.relay(net, "nft/mint", { collectionAddress: r["collection"], to: r["to"], tokenUri: r["tokenUri"], attributes: t.request["attributes"] ?? [], media: t.request["media"] ?? [] });
+        out = await core.relay(net, "nft/mint", { collectionAddress: r["collection"], to: r["to"], tokenUri: r["tokenUri"], attributes: t.request["attributes"] ?? [], media: t.request["media"] ?? [] }, t.id);
         break;
       default: throw new Error(`unknown operator action ${t.type}`);
     }
@@ -155,10 +157,13 @@ async function execute(t: TxRow) {
   }
 
   if (txHash) {
-    await db.from("transactions").update({ status: "submitted", tx_hash: txHash, submitted_at: new Date().toISOString(), result: result as never }).eq("id", t.id);
+    const { error } = await db.from("transactions").update({ status: "submitted", tx_hash: txHash, submitted_at: new Date().toISOString(), result: result as never, error_code: null, error_message: null }).eq("id", t.id);
+    if (error) {
+      console.error("submission_record_error", { requestId: t.id, txHash, message: error.message });
+      throw Object.assign(new Error("Transaction sent but its record could not be saved; check the chain before retrying"), { code: "SUBMISSION_UNKNOWN" });
+    }
   } else {
-    // Relay finished without returning a hash: treat its answer as final.
-    await finalize({ ...t, result }, []);
+    throw Object.assign(new Error("No transaction hash received; check the chain before retrying"), { code: "SUBMISSION_UNKNOWN" });
   }
 }
 
@@ -174,8 +179,9 @@ async function fail(t: TxRow, err: unknown) {
       mapped = { ...mapped, code: BigInt(fb) < BigInt(r["amountRaw"]!) ? "INSUFFICIENT_LIQUIDITY" : "INSUFFICIENT_BALANCE" };
     } catch { mapped = { ...mapped, code: "INSUFFICIENT_BALANCE" }; }
   }
-  if (mapped.retry && t.attempts < MAX_RETRIES) {
-    await db.from("transactions").update({ status: "queued", error_message: msg, next_attempt_at: new Date(Date.now() + backoffMs(t.attempts)).toISOString() }).eq("id", t.id);
+  if (submissionNeedsReconciliation((err as { code?: string })?.code, mapped.retry)) {
+    await db.from("transactions").update({ error_code: "SUBMISSION_UNKNOWN", error_message: "Submission outcome unknown; check the chain before retrying. " + msg }).eq("id", t.id);
+    await audit({ app_id: t.app_id, wallet_id: t.wallet_id, action: "tx_submission_unknown", details: { transaction_id: t.id, error: msg } });
     return;
   }
   const { data } = await db.from("transactions").update({ status: "failed", error_code: mapped.code, error_message: msg }).eq("id", t.id).select("*").single();
@@ -249,18 +255,18 @@ async function finalize(t: TxRow, events: { from_address: string; keys: string[]
   if (t.wallet_id) await db.from("wallets").update({ deployed: true }).eq("id", t.wallet_id);
   if (r["amountRaw"]) result["amountRaw"] = r["amountRaw"];
   if (r["amountRaw"]) result["amount"] = fromBaseUnits(r["amountRaw"]);
-  const { data } = await db.from("transactions").update({ status: "confirmed", confirmed_at: new Date().toISOString(), result: result as never }).eq("id", t.id).select("*").single();
+  const { data } = await db.from("transactions").update({ status: "confirmed", error_code: null, error_message: null, confirmed_at: new Date().toISOString(), result: result as never }).eq("id", t.id).select("*").single();
   await audit({ app_id: t.app_id, wallet_id: t.wallet_id, action: `tx_confirmed:${t.type}`, details: { transaction_id: t.id, tx_hash: t.tx_hash } });
   if (data) await queueWebhook(data as unknown as TxRow);
 }
 
 async function checkSubmitted(t: TxRow) {
   const core = await import("./core/core");
-  const rec = await core.receiptStatus(t.network, t.tx_hash!);
+  if (!t.tx_hash) return;
+  const rec = await core.receiptStatus(t.network, t.tx_hash);
   if (!rec) {
     if (Date.now() - new Date(t.submitted_at ?? t.created_at).getTime() > 15 * 60_000) {
-      const { data } = await db.from("transactions").update({ status: "failed", error_code: "CHAIN_TIMEOUT", error_message: "not confirmed within 15 minutes" }).eq("id", t.id).select("*").single();
-      if (data) await queueWebhook(data as unknown as TxRow);
+      await db.from("transactions").update({ error_code: "SUBMISSION_UNKNOWN", error_message: "Receipt not available yet; continuing chain checks. Do not resend." }).eq("id", t.id);
     }
     return;
   }
@@ -279,7 +285,7 @@ export async function tick(opts: { maxClaims?: number; budgetMs?: number } = {})
   const budget = opts.budgetMs ?? 20_000;
   const stats = { checked: 0, submitted: 0, failed: 0, webhooks: 0 };
 
-  await db.from("transactions").update({ status: "failed", error_code: "WORKER_STALE", error_message: "worker stopped before submitting; safe to retry with a new Idempotency-Key" })
+  await db.from("transactions").update({ error_code: "SUBMISSION_UNKNOWN", error_message: "Submission response was lost; check the chain before retrying. Do not resend." })
     .eq("status", "processing").is("tx_hash", null).lt("started_at", new Date(Date.now() - 5 * 60_000).toISOString());
 
   const { data: subs } = await db.from("transactions").select("*").eq("status", "submitted").order("submitted_at").limit(25);
@@ -299,7 +305,7 @@ export async function tick(opts: { maxClaims?: number; budgetMs?: number } = {})
 export async function waitForTx(id: string, maxMs = 45_000) {
   const until = Date.now() + maxMs;
   let t = await getTx(id);
-  while (t && !["confirmed", "failed", "cancelled"].includes(t.status) && Date.now() < until) {
+  while (t && !["confirmed", "failed", "cancelled"].includes(t.status) && t.error_code !== "SUBMISSION_UNKNOWN" && Date.now() < until) {
     await new Promise((r) => setTimeout(r, 3000));
     await tick({ maxClaims: 5, budgetMs: 8000 }).catch(() => undefined);
     t = await getTx(id);
