@@ -99,3 +99,31 @@ export async function decryptPushedKey(keyBytes: Uint8Array, address: string, iv
   pt.fill(0);
   return hex;
 }
+
+// ---- Chain history import ----
+const pad64 = (h: string) => "0x" + BigInt(h).toString(16).padStart(64, "0");
+export type TransferEvt = { tx_hash: string; ordinal: number; block_number: number; from_address: string; to_address: string; amount: string };
+/** Parse ERC-20 Transfer events (Cairo 1: keys=[sel,from,to] data=[lo,hi]; Cairo 0: keys=[sel] data=[from,to,lo,hi]). Ordinal = position within its tx, for dedupe. */
+export function parseTransferEvents(events: { transaction_hash: string; block_number?: number; keys: string[]; data: string[] }[]): TransferEvt[] {
+  const seen = new Map<string, number>(); const out: TransferEvt[] = [];
+  for (const e of events) {
+    let f: string, t: string, lo: string, hi: string;
+    if (e.keys.length >= 3 && e.data.length >= 2) [f, t, lo, hi] = [e.keys[1]!, e.keys[2]!, e.data[0]!, e.data[1]!];
+    else if (e.data.length >= 4) [f, t, lo, hi] = [e.data[0]!, e.data[1]!, e.data[2]!, e.data[3]!];
+    else continue;
+    const n = seen.get(e.transaction_hash) ?? 0; seen.set(e.transaction_hash, n + 1);
+    out.push({ tx_hash: pad64(e.transaction_hash), ordinal: n, block_number: e.block_number ?? 0, from_address: pad64(f), to_address: pad64(t), amount: (BigInt(lo) + (BigInt(hi) << 128n)).toString() });
+  }
+  return out;
+}
+/** Holder balances from transfers (zero address excluded, empty balances dropped). */
+export function balancesFromTransfers(evts: Pick<TransferEvt, "from_address" | "to_address" | "amount">[]): Map<string, bigint> {
+  const zero = pad64("0x0"); const m = new Map<string, bigint>();
+  for (const e of evts) {
+    const a = BigInt(e.amount);
+    if (e.to_address !== zero) m.set(e.to_address, (m.get(e.to_address) ?? 0n) + a);
+    if (e.from_address !== zero) m.set(e.from_address, (m.get(e.from_address) ?? 0n) - a);
+  }
+  for (const [k, v] of m) if (v <= 0n) m.delete(k);
+  return m;
+}
