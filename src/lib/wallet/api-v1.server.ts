@@ -42,7 +42,11 @@ function parse<T>(schema: z.ZodType<T>, v: unknown): T {
 async function walletOf(ctx: Ctx, id: string) {
   if (!uuid.safeParse(id).success) throw new EngineError(404, "NOT_FOUND", "wallet not found");
   const { data } = await db.from("wallets").select("id,app_id,external_id,kind,label,address,deployed,network,created_at,email").eq("id", id).maybeSingle();
-  if (!data || data.app_id !== ctx.app.id) throw new EngineError(404, "NOT_FOUND", "wallet not found");
+  if (!data) throw new EngineError(404, "NOT_FOUND", "wallet not found");
+  if (data.app_id !== ctx.app.id) {
+    const { data: link } = await db.from("wallet_app_links").select("wallet_id").eq("app_id", ctx.app.id).eq("wallet_id", data.id).limit(1).maybeSingle();
+    if (!link) throw new EngineError(404, "NOT_FOUND", "wallet not found");
+  }
   return data;
 }
 async function tokenOf(ctx: Ctx, id: string) {
@@ -102,16 +106,28 @@ function walletDto(w: { id: string; external_id: string | null; kind: string; la
 
 // ------------------------------------------------------------------ handlers
 async function createWallet(ctx: Ctx) {
-  const b = parse(z.object({ externalId: str(200), kind: z.enum(["user", "collection_owner", "treasury"]).default("user"), label: z.string().max(200).optional(), email: z.string().email().max(254).optional() }), ctx.body);
+  const b = parse(z.object({ externalId: str(200), kind: z.enum(["user", "collection_owner", "treasury"]).default("user"), label: z.string().max(200).optional(), email: z.string().email().max(254).optional(), emailVerified: z.boolean().optional() }), ctx.body);
+  const { data: linkRow } = await db.from("wallet_app_links").select("wallet_id").eq("app_id", ctx.app.id).eq("network", ctx.network).eq("external_id", b.externalId).maybeSingle();
+  if (linkRow) { const { data: lw } = await db.from("wallets").select("*").eq("id", linkRow.wallet_id).single(); return json({ ...walletDto(lw!), externalId: b.externalId, reused: true }, 200); }
   const { data: existing } = await db.from("wallets").select("*").eq("app_id", ctx.app.id).eq("network", ctx.network).eq("external_id", b.externalId).maybeSingle();
   if (existing) return json(walletDto(existing), 200);
+  // Same verified email = same wallet across apps: link this app's user to the existing wallet instead of making a new one.
+  if (b.email && b.emailVerified && b.kind === "user") {
+    const em = b.email.toLowerCase();
+    const { data: same } = await db.from("wallets").select("*").eq("network", ctx.network).is("retired_at", null).or(`email.eq.${em},retired_email.eq.${em}`).limit(1).maybeSingle();
+    if (same) {
+      await db.from("wallet_app_links").insert({ app_id: ctx.app.id, network: ctx.network, external_id: b.externalId, wallet_id: same.id });
+      await audit({ app_id: ctx.app.id, wallet_id: same.id, action: "wallet_linked_by_email", ip: ctx.ip, details: { external_id: b.externalId } });
+      return json({ ...walletDto(same), externalId: b.externalId, reused: true }, 200);
+    }
+  }
   const key = process.env["WALLET_ENCRYPTION_KEY"];
   if (!key) throw new EngineError(503, "CONFIG_ERROR", "wallet key not configured");
   const w = generateWallet();
   let email: string | null = b.email?.toLowerCase() ?? null;
   if (email) { const { data: taken } = await db.from("wallets").select("id").eq("email", email).maybeSingle(); if (taken) email = null; }
   const { data, error } = await db.from("wallets").insert({
-    app_id: ctx.app.id, network: ctx.network, external_id: b.externalId, kind: b.kind, label: b.label ?? null, email,
+    app_id: ctx.app.id, network: ctx.network, external_id: b.externalId, kind: b.kind, label: b.label ?? null, email, email_verified_at: email && b.emailVerified ? new Date().toISOString() : null,
     address: w.address, public_key: w.publicKey, class_hash: w.classHash, encrypted_private_key: await encryptSecret(w.privateKey, key), created_by_app: ctx.app.id,
   }).select("*").single();
   if (error) {
