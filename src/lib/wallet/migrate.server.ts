@@ -82,3 +82,55 @@ export async function importTokens(p: { appId: string; rows: { address: string; 
   }
   return res;
 }
+
+// ---- Push migration from Loop Do (wallet-migrate-custodial) ----
+// Loop Do encrypts each Stark key with the shared transport key WALLET_MASTER_KEY
+// (AES-256-GCM, address as AAD). We decrypt, check the key really owns the address,
+// then re-encrypt with our own storage key. The transport key is never used for storage.
+const unb64 = (s: string) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+const normAddr = (a: string) => "0x" + BigInt(a).toString(16);
+
+export async function importTransportKey(raw: string) {
+  const v = raw.trim();
+  const bytes = /^(0x)?[0-9a-fA-F]{64}$/.test(v) ? fromHex(v.padStart(64, "0")) : unb64(v);
+  if (bytes.length !== 32) throw new Error("WALLET_MASTER_KEY must be 32 bytes");
+  return crypto.subtle.importKey("raw", bytes, { name: "AES-GCM" }, false, ["decrypt"]);
+}
+
+type PushedWallet = { source_wallet_id?: string; user_id: string; address: string; public_key: string; class_hash: string; encrypted_private_key: { iv: string; ciphertext: string } };
+
+export async function receiveLoopDoWallets(wallets: PushedWallet[]) {
+  const encKey = process.env["WALLET_ENCRYPTION_KEY"];
+  const transport = process.env["WALLET_MASTER_KEY"];
+  if (!encKey || !transport) throw new Error("WALLET_ENCRYPTION_KEY / WALLET_MASTER_KEY missing");
+  const { data: app } = await db.from("registered_apps").select("id").ilike("name", "%loop do%").is("revoked_at", null).order("created_at").limit(1).maybeSingle();
+  if (!app) throw new Error("Create an app named 'Loop Do' in the Admin page first");
+  const key = await importTransportKey(transport);
+  const out: ImportResult[] = [];
+  for (const w of wallets) {
+    const externalId = String(w.user_id ?? "");
+    try {
+      if (!externalId || !w.address || !w.encrypted_private_key?.iv) { out.push({ externalId, status: "error", note: "missing fields" }); continue; }
+      const stored = normAddr(w.address);
+      const pt = new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv: unb64(w.encrypted_private_key.iv), additionalData: new TextEncoder().encode(stored), tagLength: 128 }, key, unb64(w.encrypted_private_key.ciphertext)));
+      let privateKey = "0x" + hex(pt); pt.fill(0);
+      const publicKey = ec.starkCurve.getStarkKey(privateKey);
+      const classHash = w.class_hash;
+      if (normAddr(deriveAddress(publicKey, classHash)) !== stored) { privateKey = ""; out.push({ externalId, status: "mismatch", address: w.address }); continue; }
+      const address = "0x" + BigInt(w.address).toString(16).padStart(64, "0");
+      const { data: ex } = await db.from("wallets").select("id").or(`address.eq.${address},and(app_id.eq.${app.id},external_id.eq.${externalId})`).limit(1).maybeSingle();
+      if (ex) { privateKey = ""; out.push({ externalId, status: "exists", address }); continue; }
+      const { data, error } = await db.from("wallets").insert({
+        app_id: app.id, network: "sepolia", external_id: externalId, kind: "user", address, public_key: publicKey, class_hash: classHash,
+        encrypted_private_key: await encryptSecret(privateKey, encKey), imported_from: "loop-do", created_by_app: app.id,
+      }).select("id").single();
+      privateKey = "";
+      if (error) throw error;
+      await audit({ app_id: app.id, wallet_id: data.id, action: "wallet_imported", details: { source: "loop-do-push", legacy_class: classHash !== ACCOUNT_CLASS_HASH } });
+      out.push({ externalId, status: "created", address, ...(classHash !== ACCOUNT_CLASS_HASH ? { note: "old account type: gas-free sends won't work" } : {}) });
+    } catch (e) {
+      out.push({ externalId, status: "error", note: e instanceof DOMException ? "could not decrypt (wrong WALLET_MASTER_KEY?)" : String((e as Error).message).slice(0, 200) });
+    }
+  }
+  return out;
+}
