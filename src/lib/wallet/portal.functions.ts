@@ -306,7 +306,7 @@ export const portalVerifyCode = createServerFn({ method: "POST" })
 async function ownerHoldings(walletId: string, address: string) {
   const { supabaseAdmin: db } = await import("@/integrations/supabase/client.server");
   const [h, n] = await Promise.all([
-    db.from("token_holders").select("balance,tokens(name,symbol,decimals,address)").eq("address", address).gt("balance", 0).order("balance", { ascending: false }),
+    db.from("token_holders").select("balance:balance::text,tokens(name,symbol,decimals,address)").eq("address", address).gt("balance", 0).order("balance", { ascending: false }),
     db.from("nfts").select("id,token_id,token_uri,collections(name,symbol)").eq("owner_wallet_id", walletId).limit(100),
   ]);
   const tokens = (h.data ?? []).map((r) => {
