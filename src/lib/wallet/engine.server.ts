@@ -24,6 +24,7 @@ export type TxRow = {
   attempts: number; created_at: string; submitted_at: string | null; confirmed_at: string | null;
 };
 
+import { isGasFreeClass, LEGACY_CLASS_MESSAGE } from "./chain-rules";
 export class EngineError extends Error {
   constructor(public status: number, public code: string, message?: string, public details?: Record<string, unknown>) {
     super(message ?? code);
@@ -92,6 +93,7 @@ async function walletSigner(walletId: string) {
   const { data: w } = await db.from("wallets").select("id,address,public_key,class_hash,encrypted_private_key,deployed").eq("id", walletId).single();
   const key = process.env["WALLET_ENCRYPTION_KEY"];
   if (!key) throw new Error("WALLET_ENCRYPTION_KEY not configured");
+  if (!isGasFreeClass(w!.class_hash)) throw new Error(LEGACY_CLASS_MESSAGE);
   return { w: w!, signer: { address: w!.address, publicKey: w!.public_key, classHash: w!.class_hash, privateKey: await decryptSecret(w!.encrypted_private_key, key) } };
 }
 

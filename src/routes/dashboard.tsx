@@ -87,6 +87,7 @@ function Dashboard() {
         <Stat label="Operator queue" value={s.operatorQueue} hint={s.operatorQueue ? `about ${Math.ceil(s.operatorWaitSeconds / 60)} min to clear` : "clear"} />
         <Stat label="Confirmed (24h)" value={s.confirmed24h} />
         <Stat label="Failed (24h)" value={s.failed24h} hint={s.pendingWebhooks ? `${s.pendingWebhooks} app notifications waiting` : undefined} />
+        <Stat label="Loop Do wallets moved in" value={s.loopDoImported} hint={s.loopDoImported ? `${s.loopDoLegacy} old type (not gas-free) · last ${new Date(s.loopDoLastAt!).toLocaleString()}` : "not started"} />
       </div>
 
       <Tabs defaultValue="log">

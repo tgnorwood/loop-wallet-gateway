@@ -62,6 +62,7 @@ export function mapChainError(message: string, type?: string): { code: string; s
   if (m.includes("unknown token")) return { code: "VALIDATION", status: 400, retry: false };
   if (m.includes("same token")) return { code: "VALIDATION", status: 400, retry: false };
   if (m.includes("reverted")) return { code: "REVERTED", status: 422, retry: false };
+  if (m.includes("legacy account")) return { code: "LEGACY_ACCOUNT", status: 409, retry: false };
   if (m.includes("not configured") || m.includes("not available")) return { code: "CONFIG_ERROR", status: 503, retry: false };
   return { code: "CHAIN_ERROR", status: 502, retry: true };
 }
@@ -75,4 +76,26 @@ export const WEBHOOK_MAX_AGE_MS = 24 * 3600_000;
 export function capExceeded(usedRaw: bigint, requestRaw: bigint, capHuman: string | number | null | undefined) {
   if (capHuman === null || capHuman === undefined || capHuman === "") return false;
   return usedRaw + requestRaw > toBaseUnits(String(capHuman));
+}
+
+// ---- Loop Do push migration (pure) ----
+export const GAS_FREE_CLASS_HASH = "0x02b48623275dbaedb7f16ff5d0e7a4c722727d2a3e7c4477fa4650140834ba1f";
+export const isGasFreeClass = (classHash: string) => { try { return BigInt(classHash) === BigInt(GAS_FREE_CLASS_HASH); } catch { return false; } };
+export const LEGACY_CLASS_MESSAGE = "legacy account not available for gas-free execution";
+const b64d = (s: string) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+export const normAddress = (a: string) => "0x" + BigInt(a).toString(16);
+/** WALLET_MASTER_KEY: 32 bytes as 64 hex chars (optional 0x) or base64. */
+export function parseTransportKey(raw: string): Uint8Array {
+  const v = raw.trim();
+  const bytes = /^(0x)?[0-9a-fA-F]{64}$/.test(v) ? Uint8Array.from(v.replace(/^0x/, "").match(/.{2}/g)!.map((x) => parseInt(x, 16))) : b64d(v);
+  if (bytes.length !== 32) throw new Error("WALLET_MASTER_KEY must be 32 bytes");
+  return bytes;
+}
+/** Decrypt one pushed key (AES-256-GCM, AAD = normalised address). Returns 0x hex private key. */
+export async function decryptPushedKey(keyBytes: Uint8Array, address: string, iv: string, ciphertext: string) {
+  const key = await crypto.subtle.importKey("raw", keyBytes as BufferSource, { name: "AES-GCM" }, false, ["decrypt"]);
+  const pt = new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv: b64d(iv) as BufferSource, additionalData: new TextEncoder().encode(normAddress(address)), tagLength: 128 }, key, b64d(ciphertext) as BufferSource));
+  const hex = "0x" + [...pt].map((x) => x.toString(16).padStart(2, "0")).join("");
+  pt.fill(0);
+  return hex;
 }
