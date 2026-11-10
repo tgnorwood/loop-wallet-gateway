@@ -55,6 +55,7 @@ function Dashboard() {
 
   if (isLoading) return <p className="p-8 text-muted-foreground">Loading your wallet…</p>;
   if (error || !data) return <p className="p-8 text-destructive">Couldn't load your wallet: {String((error as Error)?.message)}</p>;
+  if (data.needsVerification) return <VerifyEmail email={data.email} />;
   const strk = Number(BigInt(data.assets.balances[0]?.raw ?? "0") / 10n ** 14n) / 10000;
 
   return (
@@ -136,3 +137,47 @@ const Row = ({ left, right }: { left: string; right: string }) => (
   <div className="flex justify-between gap-4 py-2 text-sm"><span className="capitalize">{left}</span><span className="text-muted-foreground">{right}</span></div>
 );
 const Empty = ({ children }: { children: React.ReactNode }) => <p className="py-2 text-sm text-muted-foreground">{children}</p>;
+
+function VerifyEmail({ email }: { email: string }) {
+  const send = useServerFn(portalSendCode);
+  const verify = useServerFn(portalVerifyCode);
+  const qc = useQueryClient();
+  const [sent, setSent] = useState(false);
+  const [code, setCode] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [wait, setWait] = useState(0);
+  useEffect(() => { if (wait <= 0) return; const t = setTimeout(() => setWait(wait - 1), 1000); return () => clearTimeout(t); }, [wait]);
+  async function sendCode() {
+    setBusy(true);
+    const r = await send().catch((e) => ({ ok: false, error: (e as Error).message, alreadyLinked: false }));
+    setBusy(false);
+    if (r.alreadyLinked) return qc.invalidateQueries({ queryKey: ["portal"] });
+    if (!r.ok) return toast.error("error" in r ? r.error : "Couldn't send code");
+    setSent(true); setWait(60); toast.success("Code sent");
+  }
+  async function check() {
+    setBusy(true);
+    const r = await verify({ data: { code } }).catch((e) => ({ ok: false, error: (e as Error).message }));
+    setBusy(false);
+    if (!r.ok) return toast.error("error" in r && r.error === "Incorrect code" ? "That code isn't right" : ("error" in r ? r.error : "Failed"));
+    toast.success("Wallet unlocked");
+    qc.invalidateQueries({ queryKey: ["portal"] });
+  }
+  return (
+    <main className="mx-auto max-w-md px-4 py-16">
+      <section className="space-y-4 rounded-xl border bg-card p-6">
+        <h2 className="text-xl font-semibold">Check your email</h2>
+        <p className="text-sm text-muted-foreground">A wallet already exists for <span className="font-medium text-foreground">{email}</span>. To prove it's yours, we'll email you a 6-digit code.</p>
+        {!sent ? (
+          <Button className="w-full" disabled={busy} onClick={sendCode}>Send code</Button>
+        ) : (
+          <div className="space-y-3">
+            <Input inputMode="numeric" maxLength={6} placeholder="6-digit code" value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))} />
+            <Button className="w-full" disabled={busy || code.length !== 6} onClick={check}>Verify</Button>
+            <Button variant="ghost" className="w-full" disabled={busy || wait > 0} onClick={sendCode}>{wait > 0 ? `Resend in ${wait}s` : "Resend code"}</Button>
+          </div>
+        )}
+      </section>
+    </main>
+  );
+}
