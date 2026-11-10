@@ -28,7 +28,13 @@ async function assertAdmin(supabase: { rpc: (...a: never[]) => unknown }, userId
 export const getPortal = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const { svc, wallet } = await ownerWallet(context.claims as never, context.userId);
+    let owned;
+    try { owned = await ownerWallet(context.claims as never, context.userId); }
+    catch (e) {
+      if ((e as Error).message === "verify_required") return { needsVerification: true as const, email: String((context.claims as Record<string, unknown>)["email"] ?? "") };
+      throw e;
+    }
+    const { svc, wallet } = owned;
     const sb = context.supabase;
     const [assets, sessions, activity, conns, isAdmin] = await Promise.all([
       svc.getAssets(wallet.address),
@@ -44,6 +50,7 @@ export const getPortal = createServerFn({ method: "POST" })
       activity: activity.data ?? [],
       connections: conns.data ?? [],
       isAdmin: !!isAdmin.data,
+      needsVerification: false as const,
     };
   });
 
@@ -264,3 +271,33 @@ function demoTypedData() {
     message: { action: "sandbox-test" },
   };
 }
+
+// ---------- prove email before claiming an existing wallet ----------
+async function pendingWallet(claims: Record<string, unknown>, userId: string) {
+  const svc = await import("./service.server");
+  try { await ownerWallet(claims, userId); return { svc, walletId: null as string | null }; }
+  catch (e) { if (e instanceof svc.VerifyRequired) return { svc, walletId: e.walletId }; throw e; }
+}
+
+export const portalSendCode = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const { svc, walletId } = await pendingWallet(context.claims as never, context.userId);
+    if (!walletId) return { ok: true, alreadyLinked: true };
+    try { await svc.startEmailProof(walletId, { purpose: "portal_claim", userId: context.userId }, ip()); return { ok: true, alreadyLinked: false }; }
+    catch (e) { return { ok: false, error: (e as Error).message, alreadyLinked: false }; }
+  });
+
+export const portalVerifyCode = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: { code: string }) => z.object({ code: z.string().regex(/^\d{6}$/) }).parse(d))
+  .handler(async ({ data, context }) => {
+    const { svc, walletId } = await pendingWallet(context.claims as never, context.userId);
+    if (!walletId) return { ok: true };
+    try {
+      await svc.checkEmailProof({ walletId, purpose: "portal_claim", userId: context.userId }, data.code, ip());
+      const email = String((context.claims as Record<string, unknown>)["email"]).toLowerCase();
+      await svc.claimImportedWallet(context.userId, email, walletId, "email_code", null, true);
+      return { ok: true };
+    } catch (e) { return { ok: false, error: (e as Error).message }; }
+  });

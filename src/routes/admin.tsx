@@ -115,7 +115,7 @@ function Apps({ apps }: { apps: AppRow[] }) {
             {(["popup_enabled", "api_enabled", "trusted_oauth"] as const).map((k) => (
               <label key={k} className="flex items-center gap-2 text-xs">
                 <Switch checked={a[k]} disabled={!!a.revoked_at} onCheckedChange={async (v) => { await update({ data: { id: a.id, [k]: v } }); refresh(); }} />
-                {k === "popup_enabled" ? "Popup" : k === "api_enabled" ? "API" : "Trust OAuth"}
+                {k === "popup_enabled" ? "Popup" : k === "api_enabled" ? "API" : "Trusted for Google sign-in"}
               </label>
             ))}
             {!a.revoked_at && (

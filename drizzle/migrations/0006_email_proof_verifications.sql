@@ -1,0 +1,1 @@
+ALTER TABLE public.wallet_verifications ADD COLUMN IF NOT EXISTS purpose text NOT NULL DEFAULT 'takeover', ADD COLUMN IF NOT EXISTS external_id text, ADD COLUMN IF NOT EXISTS network text, ADD COLUMN IF NOT EXISTS user_id uuid;

@@ -709,8 +709,12 @@ export type Database = {
           consumed_at: string | null
           created_at: string
           expires_at: string
+          external_id: string | null
           id: string
           last_sent_at: string
+          network: string | null
+          purpose: string
+          user_id: string | null
           wallet_id: string
         }
         Insert: {
@@ -720,8 +724,12 @@ export type Database = {
           consumed_at?: string | null
           created_at?: string
           expires_at: string
+          external_id?: string | null
           id?: string
           last_sent_at?: string
+          network?: string | null
+          purpose?: string
+          user_id?: string | null
           wallet_id: string
         }
         Update: {
@@ -731,8 +739,12 @@ export type Database = {
           consumed_at?: string | null
           created_at?: string
           expires_at?: string
+          external_id?: string | null
           id?: string
           last_sent_at?: string
+          network?: string | null
+          purpose?: string
+          user_id?: string | null
           wallet_id?: string
         }
         Relationships: [

@@ -51,3 +51,11 @@ export function canAttachEmail(w: { external_id: string | null; address: string;
 export function canRetireWallet(w: { imported_from: string | null; deployed: boolean }, holdings: { tokens: number; nfts: number; strkRaw: bigint }) {
   return !w.imported_from && !w.deployed && holdings.tokens === 0 && holdings.nfts === 0 && holdings.strkRaw === 0n;
 }
+
+/** Reusing a wallet that already exists for an email needs a code, unless the person came via Google
+ *  (hub Google sign-in, or a partner app the admin trusts for Google). */
+export function needsEmailProof(p: { walletExists: boolean; alreadyLinked: boolean; method: "google" | "password" | "other"; appTrustedGoogle: boolean; isHubGoogle?: boolean }) {
+  if (!p.walletExists || p.alreadyLinked) return false;
+  if (p.method === "google" && (p.isHubGoogle || p.appTrustedGoogle)) return false;
+  return true;
+}
