@@ -39,7 +39,9 @@ Header on every call: X-App-Key: lwk_...`;
 const v1 = `Base: /api/public/v1   Headers: Authorization: Bearer lwk_...   Idempotency-Key: <uuid> (all writes)
 Amounts are decimal strings ("12.5"). Errors: { error: { code, message, details } }
 
-POST /wallets                 { externalId, kind?: user|collection_owner|treasury, label?, email? }
+POST /wallets                 { externalId, kind?: user|collection_owner|treasury, label?, email?, signInMethod?: google|password|other }
+                              201 new · 200 existing/linked · 202 { verificationId } = email already has a wallet; a code was emailed
+POST /wallets/verify          { verificationId, code }  -> 200 wallet linked to your externalId (Google skips the code only for apps trusted for Google sign-in)
 GET  /wallets?externalId=…  · /wallets/:id · /wallets/:id/balances · /wallets/:id/nfts
 POST /tokens                  { name, symbol, initialSupply, swappable? }
 POST /tokens/:id/mint         { amount }

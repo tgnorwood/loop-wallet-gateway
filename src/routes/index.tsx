@@ -148,7 +148,7 @@ function VerifyEmail({ email }: { email: string }) {
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [wait, setWait] = useState(0);
-  useEffect(() => { if (wait <= 0) return; const t = setTimeout(() => setWait(wait - 1), 1000); return () => clearTimeout(t); }, [wait]);
+  useEffect(() => { if (wait <= 0) return undefined; const t = setTimeout(() => setWait(wait - 1), 1000); return () => clearTimeout(t); }, [wait]);
   async function sendCode() {
     setBusy(true);
     const r = await send().catch((e) => ({ ok: false, error: (e as Error).message, alreadyLinked: false }));
