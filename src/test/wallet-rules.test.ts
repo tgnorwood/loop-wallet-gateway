@@ -70,3 +70,23 @@ describe("gas-free deploy payload", () => {
     expect(buildTransaction(addr, [], null).type).toBe("invoke");
   });
 });
+
+import { canAttachEmail, canRetireWallet } from "@/lib/wallet/rules";
+describe("loop do email linking", () => {
+  const w = { external_id: "u1", address: "0x042ae5", user_id: null, email: null };
+  it("requires verified email", () => expect(canAttachEmail(w, { user_id: "u1", address: "0x42ae5", email_verified: false })).toBe("unverified"));
+  it("requires matching user id and address", () => {
+    expect(canAttachEmail(w, { user_id: "u2", address: "0x42ae5", email_verified: true })).toBe("mismatch");
+    expect(canAttachEmail(w, { user_id: "u1", address: "0x99", email_verified: true })).toBe("mismatch");
+    expect(canAttachEmail(w, { user_id: "u1", address: "0x42ae5", email_verified: true })).toBe("ok");
+  });
+  it("claims once", () => expect(canAttachEmail({ ...w, user_id: "x" }, { user_id: "u1", address: "0x42ae5", email_verified: true })).toBe("already_claimed"));
+  it("never retires a wallet holding anything", () => {
+    const hub = { imported_from: null, deployed: false };
+    expect(canRetireWallet(hub, { tokens: 0, nfts: 0, strkRaw: 0n })).toBe(true);
+    expect(canRetireWallet(hub, { tokens: 1, nfts: 0, strkRaw: 0n })).toBe(false);
+    expect(canRetireWallet(hub, { tokens: 0, nfts: 0, strkRaw: 5n })).toBe(false);
+    expect(canRetireWallet({ ...hub, deployed: true }, { tokens: 0, nfts: 0, strkRaw: 0n })).toBe(false);
+    expect(canRetireWallet({ imported_from: "loop-do", deployed: false }, { tokens: 0, nfts: 0, strkRaw: 0n })).toBe(false);
+  });
+});
