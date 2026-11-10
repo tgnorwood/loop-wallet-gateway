@@ -27,6 +27,17 @@ export async function syncTokens(budgetMs = 15_000) {
   for (const t of toks as Tok[]) {
     if (Date.now() - start > budgetMs) break;
     try {
+      // First run: binary-search the deploy block so we don't scan the whole chain (~25 cheap calls).
+      if (t.synced_block == null && !t.sync_continuation) {
+        let lo = 0, hi = latest;
+        while (lo < hi) {
+          const mid = Math.floor((lo + hi) / 2);
+          const ok = await rpc<string>("starknet_getClassHashAt", { block_id: { block_number: mid }, contract_address: pad(t.address!) }).then(() => true, () => false);
+          if (ok) hi = mid; else lo = mid + 1;
+        }
+        t.synced_block = lo - 1;
+        await db.from("tokens").update({ synced_block: t.synced_block }).eq("id", t.id);
+      }
       const from = (t.synced_block ?? -1) + 1;
       const target = t.sync_target_block ?? latest;
       if (from > target && !t.sync_continuation) { await db.from("tokens").update({ sync_target_block: latest, synced_at: new Date().toISOString() }).eq("id", t.id); continue; }
