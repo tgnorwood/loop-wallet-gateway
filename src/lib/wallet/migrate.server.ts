@@ -77,7 +77,7 @@ export async function importTokens(p: { appId: string; rows: { address: string; 
     const { data: ex } = await db.from("tokens").select("id").eq("network", "sepolia").eq("address", address).maybeSingle();
     if (ex) { res.push({ address, status: "exists" }); continue; }
     if (p.dryRun) { res.push({ address, status: "would_create" }); continue; }
-    await db.from("tokens").insert({ app_id: p.appId, network: "sepolia", address, name: r.name, symbol: r.symbol, swappable: !!r.swappable });
+    await db.from("tokens").insert({ app_id: p.appId, network: "sepolia", address, name: r.name, symbol: r.symbol, swappable: !!r.swappable, imported_from: "loop-do", sync_enabled: true });
     res.push({ address, status: "created" });
   }
   return res;

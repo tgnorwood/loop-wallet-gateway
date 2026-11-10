@@ -197,6 +197,50 @@ export type Database = {
           },
         ]
       }
+      chain_events: {
+        Row: {
+          amount: number
+          block_number: number
+          created_at: string
+          from_address: string
+          id: string
+          ordinal: number
+          to_address: string
+          token_id: string
+          tx_hash: string
+        }
+        Insert: {
+          amount: number
+          block_number: number
+          created_at?: string
+          from_address: string
+          id?: string
+          ordinal: number
+          to_address: string
+          token_id: string
+          tx_hash: string
+        }
+        Update: {
+          amount?: number
+          block_number?: number
+          created_at?: string
+          from_address?: string
+          id?: string
+          ordinal?: number
+          to_address?: string
+          token_id?: string
+          tx_hash?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "chain_events_token_id_fkey"
+            columns: ["token_id"]
+            isOneToOne: false
+            referencedRelation: "tokens"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       collections: {
         Row: {
           address: string | null
@@ -376,45 +420,107 @@ export type Database = {
         }
         Relationships: []
       }
+      token_holders: {
+        Row: {
+          address: string
+          balance: number
+          token_id: string
+          updated_at: string
+        }
+        Insert: {
+          address: string
+          balance: number
+          token_id: string
+          updated_at?: string
+        }
+        Update: {
+          address?: string
+          balance?: number
+          token_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "token_holders_token_id_fkey"
+            columns: ["token_id"]
+            isOneToOne: false
+            referencedRelation: "tokens"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       tokens: {
         Row: {
           address: string | null
           app_id: string
           created_at: string
           created_tx: string | null
+          creator_ref: string | null
           decimals: number
+          event_count: number
+          holder_count: number
           id: string
+          imported_from: string | null
           is_test: boolean
           name: string
           network: string
           swappable: boolean
           symbol: string
+          sync_continuation: string | null
+          sync_enabled: boolean
+          sync_error: string | null
+          sync_target_block: number | null
+          synced_at: string | null
+          synced_block: number | null
+          total_supply: number | null
         }
         Insert: {
           address?: string | null
           app_id: string
           created_at?: string
           created_tx?: string | null
+          creator_ref?: string | null
           decimals?: number
+          event_count?: number
+          holder_count?: number
           id?: string
+          imported_from?: string | null
           is_test?: boolean
           name: string
           network?: string
           swappable?: boolean
           symbol: string
+          sync_continuation?: string | null
+          sync_enabled?: boolean
+          sync_error?: string | null
+          sync_target_block?: number | null
+          synced_at?: string | null
+          synced_block?: number | null
+          total_supply?: number | null
         }
         Update: {
           address?: string | null
           app_id?: string
           created_at?: string
           created_tx?: string | null
+          creator_ref?: string | null
           decimals?: number
+          event_count?: number
+          holder_count?: number
           id?: string
+          imported_from?: string | null
           is_test?: boolean
           name?: string
           network?: string
           swappable?: boolean
           symbol?: string
+          sync_continuation?: string | null
+          sync_enabled?: boolean
+          sync_error?: string | null
+          sync_target_block?: number | null
+          synced_at?: string | null
+          synced_block?: number | null
+          total_supply?: number | null
         }
         Relationships: []
       }
@@ -758,6 +864,7 @@ export type Database = {
         }
         Returns: boolean
       }
+      recompute_token_holders: { Args: { _token: string }; Returns: undefined }
     }
     Enums: {
       app_role: "admin" | "user"
