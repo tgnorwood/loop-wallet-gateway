@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  canRemoveMinter, capExceeded, fromBaseUnits, idempotencyDecision, kindAllowed, mapChainError, stableJson, toBaseUnits,
+  canRemoveMinter, capExceeded, fromBaseUnits, idempotencyDecision, kindAllowed, mapChainError, stableJson, swapPairAllowed, toBaseUnits,
 } from "@/lib/wallet/chain-rules";
 import { addressFromEvents, mintedTokenId } from "@/lib/wallet/core/core";
 
@@ -27,6 +27,16 @@ describe("idempotency", () => {
 });
 
 describe("permissions", () => {
+  it("allows all Loop Do token pairs regardless of individual exchange flags", () => {
+    for (const from of [false, true]) for (const to of [false, true]) {
+      expect(swapPairAllowed("Loop Do", from, to)).toBe(true);
+    }
+  });
+  it("keeps other apps restricted to pairs enabled on both tokens", () => {
+    expect(swapPairAllowed("Loop Fans", false, true)).toBe(false);
+    expect(swapPairAllowed("PressChain", true, false)).toBe(false);
+    expect(swapPairAllowed("Loop Fans", true, true)).toBe(true);
+  });
   it("the operator can never be removed as minter", () => {
     expect(canRemoveMinter("0xabc", "0x0abc")).toBe(false);
     expect(canRemoveMinter("0xdef", "0xabc")).toBe(true);

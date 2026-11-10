@@ -13,6 +13,7 @@
 - [x] Central tokens & NFT API (v1), transaction queue, webhooks, caps, audit log
 - [x] Chain dashboard (/dashboard) with activity log, tokens, collections, app settings, test-item hiding
 - [x] Expose imported transfers in a dedicated Dashboard tab with automatic populated-token selection and loading/error states
+- [x] Enable all Loop Do token pairs for exchanges while retaining ownership and chain balance checks
 - [x] Wallet import tools (Loop Do same-address, new wallets, tokens)
 - [ ] Operator actions live — waiting on RELAY_API_KEY from Tom
 - [ ] Loop Do wallet import — waiting on Loop Do's derivation secret + CSV export
