@@ -722,6 +722,7 @@ export type Database = {
           created_by_app: string | null
           deployed: boolean
           email: string | null
+          email_verified_at: string | null
           encrypted_private_key: string
           external_id: string | null
           id: string
@@ -731,6 +732,8 @@ export type Database = {
           label: string | null
           network: string
           public_key: string
+          retired_at: string | null
+          retired_email: string | null
           updated_at: string
           user_id: string | null
           verified: boolean
@@ -744,6 +747,7 @@ export type Database = {
           created_by_app?: string | null
           deployed?: boolean
           email?: string | null
+          email_verified_at?: string | null
           encrypted_private_key: string
           external_id?: string | null
           id?: string
@@ -753,6 +757,8 @@ export type Database = {
           label?: string | null
           network?: string
           public_key: string
+          retired_at?: string | null
+          retired_email?: string | null
           updated_at?: string
           user_id?: string | null
           verified?: boolean
@@ -766,6 +772,7 @@ export type Database = {
           created_by_app?: string | null
           deployed?: boolean
           email?: string | null
+          email_verified_at?: string | null
           encrypted_private_key?: string
           external_id?: string | null
           id?: string
@@ -775,6 +782,8 @@ export type Database = {
           label?: string | null
           network?: string
           public_key?: string
+          retired_at?: string | null
+          retired_email?: string | null
           updated_at?: string
           user_id?: string | null
           verified?: boolean

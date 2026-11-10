@@ -10,6 +10,8 @@ import {
   isOriginAllowed,
   isSessionActive,
   resendWaitSeconds,
+  canAttachEmail,
+  canRetireWallet,
 } from "./rules";
 
 const db = supabaseAdmin;
@@ -289,6 +291,14 @@ export async function getAssets(address: string) {
 
 // ---------- portal (signed-in owner) ----------
 export async function ensureOwnerWallet(userId: string, email: string, method: string, ip: string | null) {
+  const lower = email.toLowerCase();
+  // An imported Loop Do wallet with this verified email takes priority over a hub-made one.
+  const { data: imported } = await db.from("wallets").select("id,user_id").is("user_id", null).not("email_verified_at", "is", null)
+    .or(`email.eq.${lower},retired_email.eq.${lower}`).like("imported_from", "loop-do%").limit(1).maybeSingle();
+  if (imported) {
+    try { return await claimImportedWallet(userId, lower, imported.id, method, null); }
+    catch (e) { await audit({ wallet_id: imported.id, action: "loop_do_claim_needs_admin", ip, details: { error: (e as Error).message } }); }
+  }
   const { data: linked } = await db.from("wallets").select("*").eq("user_id", userId).maybeSingle();
   if (linked) return linked;
   const { data: byEmail } = await db.from("wallets").select("*").eq("email", email.toLowerCase()).maybeSingle();
@@ -355,4 +365,54 @@ export async function executeForWallet(walletId: string, appId: string | null, c
     await audit({ wallet_id: walletId, app_id: appId, action: "transaction_failed", ip, details: { error: String((e as Error).message).slice(0, 500) } });
     throw new ApiError(502, "sponsorship_failed", (e as Error).message);
   }
+}
+
+// ---------- Loop Do email linking ----------
+async function holdingsOf(w: { id: string; address: string }) {
+  const [tok, nft, assets] = await Promise.all([
+    db.from("token_holders").select("token_id", { count: "exact", head: true }).eq("address", w.address).gt("balance", 0),
+    db.from("nfts").select("id", { count: "exact", head: true }).eq("owner_wallet_id", w.id),
+    getAssets(w.address).catch(() => null),
+  ]);
+  return { tokens: tok.count ?? 0, nfts: nft.count ?? 0, strkRaw: assets ? BigInt(String(assets.balances[0]?.raw ?? "0")) : 1n };
+}
+
+/** Loop Do sends {user_id,address,email,email_verified}; we attach the email to the matching imported wallet. */
+export async function attachLoopDoEmails(rows: { user_id: string; address: string; email: string; email_verified: boolean }[], dryRun: boolean) {
+  const { data: app } = await db.from("registered_apps").select("id").eq("name", "Loop Do").is("revoked_at", null).maybeSingle();
+  if (!app) throw new ApiError(400, "loop_do_app_missing");
+  const { data: found } = await db.from("wallets").select("id,external_id,address,user_id,email").eq("app_id", app.id).in("external_id", rows.map((r) => r.user_id));
+  const byExt = new Map((found ?? []).map((w) => [w.external_id, w]));
+  const results: { user_id: string; status: string }[] = [];
+  for (const r of rows) {
+    const w = byExt.get(r.user_id) ?? null;
+    const check = canAttachEmail(w, r);
+    if (check !== "ok") { results.push({ user_id: r.user_id, status: check }); continue; }
+    const email = r.email.trim().toLowerCase();
+    if (w!.email === email) { results.push({ user_id: r.user_id, status: "exists" }); continue; }
+    if (dryRun) { results.push({ user_id: r.user_id, status: "would_link" }); continue; }
+    // If a hub-made wallet already owns this email, keep the email on it until the owner signs in (handled at sign-in).
+    const { data: clash } = await db.from("wallets").select("id").eq("email", email).maybeSingle();
+    const { error } = await db.from("wallets").update(clash ? { retired_email: email, email_verified_at: new Date().toISOString() } : { email, email_verified_at: new Date().toISOString() }).eq("id", w!.id);
+    results.push({ user_id: r.user_id, status: error ? "error" : clash ? "pending_owner_sign_in" : "linked" });
+    if (!error) await audit({ wallet_id: w!.id, action: "loop_do_email_linked", details: { pending: !!clash } });
+  }
+  return results;
+}
+
+/** Move a user onto an unclaimed imported wallet; retire their hub-made wallet only if empty. */
+export async function claimImportedWallet(userId: string, email: string, importedId: string, method: string, actor: string | null) {
+  const { data: imp } = await db.from("wallets").select("*").eq("id", importedId).maybeSingle();
+  if (!imp || !imp.imported_from?.startsWith("loop-do")) throw new ApiError(400, "not_an_imported_wallet");
+  if (imp.user_id && imp.user_id !== userId) throw new ApiError(409, "already_claimed");
+  const { data: current } = await db.from("wallets").select("*").or(`user_id.eq.${userId},email.eq.${email}`);
+  for (const c of (current ?? []).filter((c) => c.id !== imp.id)) {
+    if (!canRetireWallet(c, await holdingsOf(c))) throw new ApiError(409, "hub_wallet_not_empty", "The hub-made wallet holds something; an admin must decide.");
+    await revokeAllSessions(c.id);
+    await db.from("wallets").update({ user_id: null, email: null, retired_email: c.email, retired_at: new Date().toISOString() }).eq("id", c.id);
+    await audit({ wallet_id: c.id, action: "wallet_retired", method, details: { replaced_by: imp.id, actor } });
+  }
+  const { data } = await db.from("wallets").update({ user_id: userId, email, retired_email: null, verified: true, verified_method: method, updated_at: new Date().toISOString() }).eq("id", imp.id).select("*").single();
+  await audit({ wallet_id: imp.id, action: "loop_do_wallet_claimed", method, details: { actor } });
+  return data!;
 }

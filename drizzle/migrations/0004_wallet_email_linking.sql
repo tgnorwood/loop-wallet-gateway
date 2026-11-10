@@ -1,0 +1,1 @@
+ALTER TABLE public.wallets ADD COLUMN IF NOT EXISTS email_verified_at timestamptz, ADD COLUMN IF NOT EXISTS retired_at timestamptz, ADD COLUMN IF NOT EXISTS retired_email text;

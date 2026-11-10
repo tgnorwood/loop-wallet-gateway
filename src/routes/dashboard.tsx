@@ -12,7 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuth } from "@/hooks/use-auth";
 import { fromBaseUnits, publicTransactionStatus } from "@/lib/wallet/chain-rules";
-import { adminImport, adminMarkTest, adminResyncToken, adminTokenHistory, adminUpdateAppChain, chainDashboard } from "@/lib/wallet/chain-admin.functions";
+import { adminImport, adminLinkImportedWallet, adminMarkTest, adminResyncToken, adminTokenHistory, adminUpdateAppChain, chainDashboard } from "@/lib/wallet/chain-admin.functions";
 
 export const Route = createFileRoute("/dashboard")({
   head: () => ({
@@ -100,7 +100,10 @@ function Dashboard() {
           <TabsTrigger value="collections">Collections</TabsTrigger>
           <TabsTrigger value="apps">Apps</TabsTrigger>
           <TabsTrigger value="import">Move wallets in</TabsTrigger>
+          <TabsTrigger value="users">Users</TabsTrigger>
         </TabsList>
+
+        <TabsContent value="users" className="rounded-xl border bg-card p-4"><LinkWallet /></TabsContent>
 
         <TabsContent value="log" className="rounded-xl border bg-card p-4">
           <div className="mb-3 flex gap-2 text-sm">
@@ -333,5 +336,38 @@ function Import({ apps, loopDoReady }: { apps: AppRow[]; loopDoReady: boolean })
         </div>
       )}
     </section>
+  );
+}
+
+function LinkWallet() {
+  const link = useServerFn(adminLinkImportedWallet);
+  const [email, setEmail] = useState("");
+  const [address, setAddress] = useState("");
+  const [preview, setPreview] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  async function run(confirm: boolean) {
+    setBusy(true);
+    try {
+      const r = await link({ data: { email, address, confirm } });
+      if (!r.ok) { toast.error(r.error); setPreview(null); return; }
+      if (r.preview) setPreview(r.loopDoUserId ?? "unknown");
+      else { toast.success("Wallet linked. The account now uses the Loop Do wallet."); setPreview(null); }
+    } catch (e) { toast.error((e as Error).message); } finally { setBusy(false); }
+  }
+  return (
+    <div className="max-w-lg space-y-3">
+      <h3 className="font-semibold">Link Loop Do wallet</h3>
+      <p className="text-sm text-muted-foreground">Give a hub account its moved-in Loop Do wallet. An empty hub-made wallet is retired; one holding anything is never touched.</p>
+      <Input placeholder="Account email" value={email} onChange={(e) => { setEmail(e.target.value); setPreview(null); }} />
+      <Input placeholder="Loop Do wallet address (0x…)" value={address} onChange={(e) => { setAddress(e.target.value); setPreview(null); }} />
+      {preview ? (
+        <div className="space-y-2 rounded-lg border p-3 text-sm">
+          <p>Loop Do user ID: <span className="font-mono break-all">{preview}</span></p>
+          <Button disabled={busy} onClick={() => run(true)}>Confirm link</Button>
+        </div>
+      ) : (
+        <Button disabled={busy || !email || !address} onClick={() => run(false)}>Check</Button>
+      )}
+    </div>
   );
 }

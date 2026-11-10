@@ -37,3 +37,17 @@ export function isOriginAllowed(origin: string | null, allowed: string[]) {
   const o = origin.replace(/\/$/, "").toLowerCase();
   return allowed.some((a) => a.replace(/\/$/, "").toLowerCase() === o);
 }
+
+/** An imported wallet may take an email only when Loop Do's record matches what was moved in and the email is verified. */
+export function canAttachEmail(w: { external_id: string | null; address: string; user_id: string | null; email: string | null } | null, row: { user_id: string; address: string; email_verified: boolean }) {
+  if (!w) return "not_found" as const;
+  if (!row.email_verified) return "unverified" as const;
+  if (w.external_id !== row.user_id || BigInt(w.address) !== BigInt(row.address)) return "mismatch" as const;
+  if (w.user_id) return "already_claimed" as const;
+  return "ok" as const;
+}
+
+/** A hub-made wallet is only retired when it was never deployed and holds nothing. */
+export function canRetireWallet(w: { imported_from: string | null; deployed: boolean }, holdings: { tokens: number; nfts: number; strkRaw: bigint }) {
+  return !w.imported_from && !w.deployed && holdings.tokens === 0 && holdings.nfts === 0 && holdings.strkRaw === 0n;
+}
