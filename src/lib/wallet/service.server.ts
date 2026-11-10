@@ -12,6 +12,7 @@ import {
   resendWaitSeconds,
   canAttachEmail,
   canRetireWallet,
+  needsEmailProof,
 } from "./rules";
 
 const db = supabaseAdmin;
@@ -290,32 +291,64 @@ export async function getAssets(address: string) {
 }
 
 // ---------- portal (signed-in owner) ----------
+export class VerifyRequired extends Error { constructor(public walletId: string) { super("verify_required"); } }
+
+/** Returns the signed-in owner's wallet. Throws VerifyRequired when the email already has a wallet the
+ *  person doesn't own yet and they didn't sign in with Google — they must enter an emailed code first. */
 export async function ensureOwnerWallet(userId: string, email: string, method: string, ip: string | null) {
   const lower = email.toLowerCase();
-  // An imported Loop Do wallet with this verified email takes priority over a hub-made one.
-  const { data: imported } = await db.from("wallets").select("id,user_id").is("user_id", null).not("email_verified_at", "is", null)
-    .or(`email.eq.${lower},retired_email.eq.${lower}`).like("imported_from", "loop-do%").limit(1).maybeSingle();
-  if (imported) {
-    try { return await claimImportedWallet(userId, lower, imported.id, method, null); }
-    catch (e) { await audit({ wallet_id: imported.id, action: "loop_do_claim_needs_admin", ip, details: { error: (e as Error).message } }); }
+  const google = method === "google";
+  const { data: unowned } = await db.from("wallets").select("id,imported_from,email_verified_at").is("user_id", null).is("retired_at", null)
+    .or(`email.eq.${lower},retired_email.eq.${lower}`).limit(1).maybeSingle();
+  if (unowned && !(unowned.imported_from && !unowned.email_verified_at)) {
+    if (needsEmailProof({ walletExists: true, alreadyLinked: false, method: google ? "google" : "password", appTrustedGoogle: false, isHubGoogle: google })) throw new VerifyRequired(unowned.id);
+    try { return await claimImportedWallet(userId, lower, unowned.id, method, null, true); }
+    catch (e) { await audit({ wallet_id: unowned.id, action: "loop_do_claim_needs_admin", ip, details: { error: (e as Error).message } }); }
   }
   const { data: linked } = await db.from("wallets").select("*").eq("user_id", userId).maybeSingle();
   if (linked) return linked;
-  const { data: byEmail } = await db.from("wallets").select("*").eq("email", email.toLowerCase()).maybeSingle();
-  if (byEmail) {
-    await revokeAllSessions(byEmail.id);
-    const { data } = await db
-      .from("wallets")
-      .update({ user_id: userId, verified: true, verified_method: method, updated_at: new Date().toISOString() })
-      .eq("id", byEmail.id)
-      .select("*")
-      .single();
-    await audit({ wallet_id: byEmail.id, action: "reclaimed_by_owner", method, ip });
-    return data!;
-  }
-  const w = await insertWallet(email.toLowerCase(), { user_id: userId, verified: true, method });
+  const w = await insertWallet(lower, { user_id: userId, verified: true, method });
   await audit({ wallet_id: w.id, action: "wallet_created", method, ip });
   return w;
+}
+
+// ---------- email proof codes (portal claim + partner app linking) ----------
+export async function startEmailProof(walletId: string, p: { purpose: "portal_claim" | "app_link"; appId?: string | null; userId?: string | null; externalId?: string | null; network?: string | null }, ip: string | null) {
+  const { data: w } = await db.from("wallets").select("id,email,retired_email").eq("id", walletId).single();
+  const to = w?.email ?? w?.retired_email;
+  if (!to) throw new ApiError(400, "wallet_has_no_email");
+  await rateLimit(`proof:${to}`, 5, 10 * 60_000);
+  const { data: last } = await db.from("wallet_verifications").select("last_sent_at").eq("wallet_id", walletId).eq("purpose", p.purpose).is("consumed_at", null).order("created_at", { ascending: false }).limit(1).maybeSingle();
+  if (last) { const wait = resendWaitSeconds(last); if (wait > 0) throw new ApiError(429, "resend_cooldown", `Wait ${wait}s`, { retry_after: wait }); }
+  await db.from("wallet_verifications").update({ consumed_at: new Date().toISOString() }).eq("wallet_id", walletId).eq("purpose", p.purpose).is("consumed_at", null);
+  const code = randomOtp();
+  const { data: ver } = await db.from("wallet_verifications").insert({
+    wallet_id: walletId, app_id: p.appId ?? null, purpose: p.purpose, user_id: p.userId ?? null, external_id: p.externalId ?? null, network: p.network ?? null,
+    code_hash: await sha256Hex(walletId + ":" + code), expires_at: new Date(Date.now() + OTP_TTL_MS).toISOString(),
+  }).select("id").single();
+  const { sendOtpEmail } = await import("./email.server");
+  const sent = await sendOtpEmail(to, code, `proof-${ver!.id}`);
+  await audit({ wallet_id: walletId, app_id: p.appId ?? null, action: sent.ok ? "email_proof_sent" : "otp_send_failed", ip, details: { purpose: p.purpose } });
+  return ver!.id;
+}
+
+export async function checkEmailProof(where: { id?: string; walletId?: string; purpose: string; userId?: string; appId?: string }, code: string, ip: string | null) {
+  let q = db.from("wallet_verifications").select("*").eq("purpose", where.purpose).is("consumed_at", null);
+  if (where.id) q = q.eq("id", where.id);
+  if (where.walletId) q = q.eq("wallet_id", where.walletId);
+  if (where.userId) q = q.eq("user_id", where.userId);
+  if (where.appId) q = q.eq("app_id", where.appId);
+  const { data: v } = await q.order("created_at", { ascending: false }).limit(1).maybeSingle();
+  if (!v) throw new ApiError(400, "no_pending_code");
+  const state = checkOtpUsable(v);
+  if (state !== "ok") throw new ApiError(400, state);
+  if ((await sha256Hex(v.wallet_id + ":" + code.trim())) !== v.code_hash) {
+    await db.from("wallet_verifications").update({ attempts: v.attempts + 1 }).eq("id", v.id);
+    await audit({ wallet_id: v.wallet_id, app_id: v.app_id, action: "otp_failed", ip, details: { purpose: where.purpose } });
+    throw new ApiError(400, "invalid_code", "Incorrect code", { attempts_left: Math.max(0, 4 - v.attempts) });
+  }
+  await db.from("wallet_verifications").update({ consumed_at: new Date().toISOString() }).eq("id", v.id);
+  return v;
 }
 
 // ---------- popup (code + PKCE) ----------
@@ -401,9 +434,9 @@ export async function attachLoopDoEmails(rows: { user_id: string; address: strin
 }
 
 /** Move a user onto an unclaimed imported wallet; retire their hub-made wallet only if empty. */
-export async function claimImportedWallet(userId: string, email: string, importedId: string, method: string, actor: string | null) {
+export async function claimImportedWallet(userId: string, email: string, importedId: string, method: string, actor: string | null, anyWallet = false) {
   const { data: imp } = await db.from("wallets").select("*").eq("id", importedId).maybeSingle();
-  if (!imp || !imp.imported_from?.startsWith("loop-do")) throw new ApiError(400, "not_an_imported_wallet");
+  if (!imp || (!anyWallet && !imp.imported_from?.startsWith("loop-do"))) throw new ApiError(400, "not_an_imported_wallet");
   if (imp.user_id && imp.user_id !== userId) throw new ApiError(409, "already_claimed");
   const { data: current } = await db.from("wallets").select("*").or(`user_id.eq.${userId},email.eq.${email}`);
   for (const c of (current ?? []).filter((c) => c.id !== imp.id)) {

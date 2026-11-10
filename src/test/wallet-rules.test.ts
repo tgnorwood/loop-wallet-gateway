@@ -90,3 +90,15 @@ describe("loop do email linking", () => {
     expect(canRetireWallet({ imported_from: "loop-do", deployed: false }, { tokens: 0, nfts: 0, strkRaw: 0n })).toBe(false);
   });
 });
+
+import { needsEmailProof } from "@/lib/wallet/rules";
+describe("email proof before reusing a wallet", () => {
+  const base = { walletExists: true, alreadyLinked: false, appTrustedGoogle: false };
+  it("new email needs no code", () => expect(needsEmailProof({ ...base, walletExists: false, method: "password" })).toBe(false));
+  it("already linked needs no code", () => expect(needsEmailProof({ ...base, alreadyLinked: true, method: "password" })).toBe(false));
+  it("password sign-in needs a code", () => expect(needsEmailProof({ ...base, method: "password" })).toBe(true));
+  it("hub Google skips", () => expect(needsEmailProof({ ...base, method: "google", isHubGoogle: true })).toBe(false));
+  it("Google via untrusted app still needs a code", () => expect(needsEmailProof({ ...base, method: "google" })).toBe(true));
+  it("Google via trusted app skips", () => expect(needsEmailProof({ ...base, method: "google", appTrustedGoogle: true })).toBe(false));
+  it("unknown method needs a code even if trusted", () => expect(needsEmailProof({ ...base, method: "other", appTrustedGoogle: true })).toBe(true));
+});
