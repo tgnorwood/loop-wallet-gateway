@@ -11,7 +11,8 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuth } from "@/hooks/use-auth";
-import { adminImport, adminMarkTest, adminUpdateAppChain, chainDashboard } from "@/lib/wallet/chain-admin.functions";
+import { fromBaseUnits } from "@/lib/wallet/chain-rules";
+import { adminImport, adminMarkTest, adminResyncToken, adminTokenHistory, adminUpdateAppChain, chainDashboard } from "@/lib/wallet/chain-admin.functions";
 
 export const Route = createFileRoute("/dashboard")({
   head: () => ({
@@ -121,6 +122,7 @@ function Dashboard() {
 
         <TabsContent value="tokens" className="rounded-xl border bg-card p-4">
           <ItemList kind="token" items={data.tokens} appName={appName} />
+          <TokenHistory tokens={data.tokens} />
         </TabsContent>
         <TabsContent value="collections" className="rounded-xl border bg-card p-4">
           <ItemList kind="collection" items={data.collections} appName={appName} />
@@ -155,6 +157,60 @@ function ItemList({ kind, items, appName }: { kind: "token" | "collection"; item
         </div>
       ))}
     </>
+  );
+}
+
+type TokRow = Awaited<ReturnType<typeof chainDashboard>>["tokens"][number];
+const amt = (v: string) => { try { return fromBaseUnits(v); } catch { return v; } };
+function TokenHistory({ tokens }: { tokens: TokRow[] }) {
+  const synced = tokens.filter((t) => t.sync_enabled);
+  const [id, setId] = useState("");
+  const load = useServerFn(adminTokenHistory);
+  const resync = useServerFn(adminResyncToken);
+  const qc = useQueryClient();
+  const sel = synced.find((t) => t.id === id);
+  const { data } = useQuery({ queryKey: ["tok-hist", id], queryFn: () => load({ data: { tokenId: id } }), enabled: !!id, refetchInterval: 15_000 });
+  return (
+    <section className="mt-6 space-y-3 border-t pt-4">
+      <h3 className="font-semibold">Holders and history (from Starknet)</h3>
+      {!synced.length ? <p className="text-sm text-muted-foreground">No imported tokens yet. Once Loop Do sends its token list, each token's holders and transfers are read from the chain here.</p> : (
+        <>
+          <select className="h-9 rounded-md border bg-background px-2 text-sm" value={id} onChange={(e) => setId(e.target.value)}>
+            <option value="">Choose a token…</option>
+            {synced.map((t) => <option key={t.id} value={t.id}>{t.name} ({t.symbol}) · {t.holder_count} holders</option>)}
+          </select>
+          {sel && (
+            <div className="space-y-3 text-sm">
+              <p className="text-muted-foreground">
+                {sel.creator_ref ? `Created by ${sel.creator_ref} · ` : ""}Supply {amt(String(sel.total_supply ?? "0"))} · {sel.holder_count} holders · {sel.event_count} transfers ·{" "}
+                {sel.sync_error ? <span className="text-destructive">sync problem: {sel.sync_error}</span> : sel.synced_block != null ? `up to date to block ${sel.synced_block}` : "reading history…"}
+              </p>
+              <Button size="sm" variant="outline" onClick={async () => { await resync({ data: { tokenId: sel.id } }); qc.invalidateQueries({ queryKey: ["chain-dash"] }); qc.invalidateQueries({ queryKey: ["tok-hist", id] }); toast.success("Re-reading from chain"); }}>Re-sync from chain</Button>
+              <div className="grid gap-4 lg:grid-cols-2">
+                <div>
+                  <p className="mb-1 font-medium">Holders</p>
+                  {data?.holders.map((h) => (
+                    <div key={h.address} className="flex justify-between gap-2 border-t py-1">
+                      <a className="font-mono text-xs underline" href={voyager("contract", h.address)} target="_blank" rel="noreferrer">{h.who || short(h.address)}</a>
+                      <span>{amt(h.balance)}</span>
+                    </div>
+                  ))}
+                </div>
+                <div>
+                  <p className="mb-1 font-medium">Transfers</p>
+                  {data?.events.map((e) => (
+                    <div key={e.tx_hash + e.from_address + e.to_address} className="flex justify-between gap-2 border-t py-1 text-xs">
+                      <span>{/^0x0+$/.test(e.from_address) ? "minted" : e.fromWho || short(e.from_address)} → {e.toWho || short(e.to_address)}</span>
+                      <span className="flex gap-2">{amt(e.amount)} <a className="underline" href={voyager("tx", e.tx_hash)} target="_blank" rel="noreferrer">#{e.block_number}</a></span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </section>
   );
 }
 

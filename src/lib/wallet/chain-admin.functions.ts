@@ -17,7 +17,7 @@ export const chainDashboard = createServerFn({ method: "POST" })
     let txq = sb.from("transactions").select("id,app_id,type,status,tx_hash,error_code,error_message,created_at,confirmed_at,network,signer_key").order("created_at", { ascending: false }).limit(100);
     if (data.appId) txq = txq.eq("app_id", data.appId);
     if (data.status) txq = txq.eq("status", data.status);
-    let tokq = sb.from("tokens").select("id,app_id,name,symbol,address,swappable,is_test,created_at").order("created_at", { ascending: false }).limit(200);
+    let tokq = sb.from("tokens").select("id,app_id,name,symbol,address,swappable,is_test,created_at,imported_from,creator_ref,sync_enabled,synced_block,synced_at,sync_error,holder_count,event_count,total_supply").order("created_at", { ascending: false }).limit(200);
     let colq = sb.from("collections").select("id,app_id,name,symbol,address,royalty_bps,frozen,is_test,created_at").order("created_at", { ascending: false }).limit(200);
     if (data.hideTest) { tokq = tokq.eq("is_test", false); colq = colq.eq("is_test", false); }
     if (data.appId) { tokq = tokq.eq("app_id", data.appId); colq = colq.eq("app_id", data.appId); }
@@ -122,4 +122,35 @@ export const adminImport = createServerFn({ method: "POST" })
       rows: rows.map((r) => ({ externalId: r["user_id"] || r["external_id"] || r["externalid"] || r["email"] || "", email: r["email"], salt: r["salt"], privateKey: r["private_key"] || undefined, address: r["address"], kind: r["kind"] || undefined })).filter((r) => r.externalId),
     });
     return { rows: res };
+  });
+
+export const adminTokenHistory = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: { tokenId: string }) => z.object({ tokenId: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.supabase, context.userId);
+    const sb = context.supabase;
+    const [holders, events] = await Promise.all([
+      sb.from("token_holders").select("address,balance").eq("token_id", data.tokenId).order("balance", { ascending: false }).limit(200),
+      sb.from("chain_events").select("tx_hash,block_number,from_address,to_address,amount").eq("token_id", data.tokenId).order("block_number", { ascending: false }).limit(200),
+    ]);
+    const addrs = [...new Set([...(holders.data ?? []).map((h) => h.address), ...(events.data ?? []).flatMap((e) => [e.from_address, e.to_address])])];
+    const { data: ws } = addrs.length ? await sb.from("wallets").select("address,email,external_id").in("address", addrs.slice(0, 500)) : { data: [] };
+    const who: Record<string, string> = {};
+    for (const w of ws ?? []) who[w.address] = w.email ?? (w.external_id ? `user ${w.external_id}` : "");
+    return {
+      holders: (holders.data ?? []).map((h) => ({ ...h, balance: String(h.balance), who: who[h.address] ?? null })),
+      events: (events.data ?? []).map((e) => ({ ...e, amount: String(e.amount), fromWho: who[e.from_address] ?? null, toWho: who[e.to_address] ?? null })),
+    };
+  });
+
+export const adminResyncToken = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: { tokenId: string }) => z.object({ tokenId: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.supabase, context.userId);
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    await supabaseAdmin.from("tokens").update({ sync_enabled: true, synced_block: null, sync_target_block: null, sync_continuation: null, sync_error: null }).eq("id", data.tokenId);
+    const { syncTokens } = await import("./token-sync.server");
+    return syncTokens(20_000);
   });
