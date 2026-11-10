@@ -95,6 +95,7 @@ function Dashboard() {
         <TabsList className="h-auto flex-wrap justify-start">
           <TabsTrigger value="log">Activity log</TabsTrigger>
           <TabsTrigger value="transfers">Transfers</TabsTrigger>
+          <TabsTrigger value="swaps">Swaps</TabsTrigger>
           <TabsTrigger value="tokens">Tokens</TabsTrigger>
           <TabsTrigger value="collections">Collections</TabsTrigger>
           <TabsTrigger value="apps">Apps</TabsTrigger>
@@ -123,6 +124,20 @@ function Dashboard() {
 
         <TabsContent value="transfers">
           <TokenHistory tokens={data.tokens} />
+        </TabsContent>
+        <TabsContent value="swaps" className="space-y-3 border-t pt-4">
+          <h3 className="font-semibold">Swaps</h3>
+          {data.transactions.filter((t) => t.type === "swap").length === 0 && <p className="text-sm text-muted-foreground">No swaps in the current activity results.</p>}
+          {data.transactions.filter((t) => t.type === "swap").map((t) => (
+            <div key={t.id} className="flex flex-wrap items-center gap-3 border-t py-3 text-sm">
+              <span className="text-muted-foreground">{new Date(t.created_at).toLocaleString()}</span>
+              <span className="font-medium">{appName(t.app_id)}</span>
+              <span className="break-all font-mono text-xs text-muted-foreground">{short(t.tx_hash ?? t.id)}</span>
+              <span className={t.status === "failed" ? "text-destructive" : t.status === "confirmed" ? "text-primary" : "text-muted-foreground"}>{publicTransactionStatus(t.status, t.error_code)}</span>
+              {t.tx_hash && <a className="ml-auto underline" href={voyager("tx", t.tx_hash)} target="_blank" rel="noreferrer">View swap ↗</a>}
+              {t.error_message && <p className="w-full break-words text-muted-foreground">{t.error_message}</p>}
+            </div>
+          ))}
         </TabsContent>
         <TabsContent value="tokens" className="rounded-xl border bg-card p-4">
           <ItemList kind="token" items={data.tokens} appName={appName} />
@@ -192,8 +207,12 @@ function TokenHistory({ tokens }: { tokens: TokRow[] }) {
               <Button size="sm" variant="outline" onClick={async () => { try { await resync({ data: { tokenId: sel.id } }); qc.invalidateQueries({ queryKey: ["chain-dash"] }); qc.invalidateQueries({ queryKey: ["tok-hist", selectedId] }); toast.success("Re-reading from chain"); } catch { toast.error("Could not re-sync this token. Please try again."); } }}>Re-sync from chain</Button>
               {isLoading && <p className="text-muted-foreground">Loading holders and transfers…</p>}
               {error && <p className="text-destructive">Could not load holders and transfers. <Button size="sm" variant="outline" onClick={() => qc.invalidateQueries({ queryKey: ["tok-hist", selectedId] })}>Retry</Button></p>}
-              {data && <div className="grid gap-4 lg:grid-cols-2">
-                <div className="min-w-0">
+              {data && <Tabs defaultValue="holders">
+                <TabsList>
+                  <TabsTrigger value="holders">Holders</TabsTrigger>
+                  <TabsTrigger value="history">Transfers</TabsTrigger>
+                </TabsList>
+                <TabsContent value="holders" className="min-w-0">
                   <p className="mb-1 font-medium">Holders</p>
                   {!data.holders.length && <p className="text-muted-foreground">No holders recorded yet.</p>}
                   {data?.holders.map((h) => (
@@ -202,8 +221,8 @@ function TokenHistory({ tokens }: { tokens: TokRow[] }) {
                       <span className="shrink-0">{amt(h.balance)}</span>
                     </div>
                   ))}
-                </div>
-                <div className="min-w-0">
+                </TabsContent>
+                <TabsContent value="history" className="min-w-0">
                   <p className="mb-1 font-medium">Transfers · latest {data.events.length}</p>
                   {!data.events.length && <p className="text-muted-foreground">No transfers recorded yet.</p>}
                   {data.events.map((e, index) => (
@@ -212,8 +231,8 @@ function TokenHistory({ tokens }: { tokens: TokRow[] }) {
                       <span className="flex shrink-0 gap-2">{amt(e.amount)} <a className="underline" href={voyager("tx", e.tx_hash)} target="_blank" rel="noreferrer">#{e.block_number}</a></span>
                     </div>
                   ))}
-                </div>
-              </div>}
+                </TabsContent>
+              </Tabs>}
             </div>
           )}
         </>
