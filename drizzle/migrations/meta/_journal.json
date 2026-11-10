@@ -43,6 +43,13 @@
       "when": 1794288062708,
       "tag": "0005_wallet_app_links",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1794288491666,
+      "tag": "0006_email_proof_verifications",
+      "breakpoints": true
     }
   ]
 }
