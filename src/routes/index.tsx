@@ -153,15 +153,15 @@ function VerifyEmail({ email }: { email: string }) {
     setBusy(true);
     const r = await send().catch((e) => ({ ok: false, error: (e as Error).message, alreadyLinked: false }));
     setBusy(false);
-    if (r.alreadyLinked) return qc.invalidateQueries({ queryKey: ["portal"] });
-    if (!r.ok) return toast.error("error" in r ? r.error : "Couldn't send code");
+    if (r.alreadyLinked) { void qc.invalidateQueries({ queryKey: ["portal"] }); return; }
+    if (!r.ok) { toast.error("error" in r ? r.error : "Couldn't send code"); return; }
     setSent(true); setWait(60); toast.success("Code sent");
   }
   async function check() {
     setBusy(true);
     const r = await verify({ data: { code } }).catch((e) => ({ ok: false, error: (e as Error).message }));
     setBusy(false);
-    if (!r.ok) return toast.error("error" in r && r.error === "Incorrect code" ? "That code isn't right" : ("error" in r ? r.error : "Failed"));
+    if (!r.ok) { toast.error("error" in r && r.error === "Incorrect code" ? "That code isn't right" : ("error" in r ? r.error : "Failed")); return; }
     toast.success("Wallet unlocked");
     qc.invalidateQueries({ queryKey: ["portal"] });
   }
