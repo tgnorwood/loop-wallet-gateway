@@ -33,12 +33,18 @@ export const chainDashboard = createServerFn({ method: "POST" })
       sb.from("registered_apps").select("id,name,webhook_url,daily_mint_cap,daily_distribute_cap,rate_limit_per_min,mainnet_enabled,api_enabled").is("revoked_at", null).order("name"),
       sb.from("webhook_deliveries").select("id", { count: "exact", head: true }).eq("status", "pending"),
     ]);
+    const [ldAll, ldLegacy, ldLast] = await Promise.all([
+      sb.from("wallets").select("id", { count: "exact", head: true }).in("imported_from", ["loop-do", "loop-do-legacy"]),
+      sb.from("wallets").select("id", { count: "exact", head: true }).eq("imported_from", "loop-do-legacy"),
+      sb.from("wallets").select("created_at").in("imported_from", ["loop-do", "loop-do-legacy"]).order("created_at", { ascending: false }).limit(1).maybeSingle(),
+    ]);
     const opDepth = opQueued.count ?? 0;
     return {
       stats: {
         wallets: wallets.count ?? 0, tokens: tokens.data?.length ?? 0, collections: cols.data?.length ?? 0, nfts: nfts.count ?? 0,
         inFlight: queued.count ?? 0, operatorQueue: opDepth, operatorWaitSeconds: opDepth * 14,
         confirmed24h: confirmed24.count ?? 0, failed24h: failed24.count ?? 0, pendingWebhooks: hooks.count ?? 0,
+        loopDoImported: ldAll.count ?? 0, loopDoLegacy: ldLegacy.count ?? 0, loopDoLastAt: ldLast.data?.created_at ?? null,
       },
       transactions: txs.data ?? [], tokens: tokens.data ?? [], collections: cols.data ?? [], apps: apps.data ?? [],
       relayConfigured: !!process.env["RELAY_API_KEY"], loopDoSecretConfigured: !!process.env["LOOPDO_WALLET_DERIVATION_SECRET"],
