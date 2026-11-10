@@ -10,7 +10,9 @@ export const Route = createFileRoute("/api/public/jobs/wallet-worker")({
         if (authFailure) return authFailure;
         const { tick } = await import("@/lib/wallet/engine.server");
         const stats = await tick({ maxClaims: 10, budgetMs: 20_000 });
-        return Response.json({ ok: true, ...stats });
+        let history = {};
+        try { const { syncTokens } = await import("@/lib/wallet/token-sync.server"); history = await syncTokens(10_000); } catch (e) { history = { error: (e as Error).message }; }
+        return Response.json({ ok: true, ...stats, history });
       },
     },
   },
