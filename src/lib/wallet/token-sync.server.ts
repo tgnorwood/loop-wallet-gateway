@@ -3,7 +3,6 @@ import { hash } from "starknet";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { parseTransferEvents } from "./chain-rules";
 import { rpcUrl } from "./paymaster.server";
-import { audit } from "./service.server";
 
 const db = supabaseAdmin;
 const SEL = hash.getSelectorFromName("Transfer");
@@ -64,28 +63,4 @@ export async function syncTokens(budgetMs = 15_000) {
     }
   }
   return { pages, events };
-}
-
-type PushedToken = { address: string; name: string; symbol: string; creator_user_id?: string | undefined; creator_email?: string | undefined; swappable?: boolean | undefined };
-/** Loop Do pushes its token list; each is registered under the "Loop Do" app and queued for chain backfill. */
-export async function receiveLoopDoTokens(tokens: PushedToken[], dryRun: boolean) {
-  const { data: app } = await db.from("registered_apps").select("id").ilike("name", "loop do").is("revoked_at", null).order("created_at").limit(1).maybeSingle();
-  if (!app) throw new Error("Create an app named 'Loop Do' in the Admin page first");
-  const out: { address: string; status: string; note?: string }[] = [];
-  for (const t of tokens) {
-    let address: string;
-    try { address = pad(t.address); } catch { out.push({ address: String(t?.address), status: "error", note: "invalid address" }); continue; }
-    if (!t.name || !t.symbol) { out.push({ address, status: "error", note: "name and symbol required" }); continue; }
-    const { data: ex } = await db.from("tokens").select("id,sync_enabled").eq("network", "sepolia").eq("address", address).maybeSingle();
-    if (ex) {
-      if (!dryRun && !ex.sync_enabled) await db.from("tokens").update({ sync_enabled: true }).eq("id", ex.id);
-      out.push({ address, status: "exists" }); continue;
-    }
-    if (dryRun) { out.push({ address, status: "would_create" }); continue; }
-    const { error } = await db.from("tokens").insert({ app_id: app.id, network: "sepolia", address, name: t.name.slice(0, 100), symbol: t.symbol.slice(0, 20), swappable: !!t.swappable,
-      imported_from: "loop-do", creator_ref: (t.creator_email ?? t.creator_user_id ?? null)?.slice(0, 200) ?? null, sync_enabled: true });
-    out.push(error ? { address, status: "error", note: error.message } : { address, status: "created" });
-  }
-  if (!dryRun) await audit({ app_id: app.id, action: "tokens_imported", details: { source: "loop-do-push", received: tokens.length, created: out.filter((r) => r.status === "created").length } });
-  return out;
 }

@@ -7,6 +7,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { supabase } from "@/integrations/supabase/client";
 import { approveConnect } from "@/lib/wallet/portal.functions";
 import { Shell, reply, usePartnerApp } from "@/components/connect-shared";
+import { VerifyEmail } from "@/components/VerifyEmail";
 
 type Search = { app?: string; origin?: string; challenge?: string };
 
@@ -39,11 +40,14 @@ function Connect() {
   const approve = useServerFn(approveConnect);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [verifyEmail, setVerifyEmail] = useState<string | null>(null);
 
   if (!appId || !origin || !challenge) return <Shell><p className="text-destructive">This sign-in link is incomplete.</p></Shell>;
   if (app === undefined || loading) return <Shell><p className="text-muted-foreground">Loading…</p></Shell>;
   if (!app || !app.popup_enabled) return <Shell><p className="text-destructive">This app can't use Loop Wallet sign-in.</p></Shell>;
   if (!user) return <Shell><SignInCard title={`Log in to ${app.name}`} subtitle="with your Loop Wallet" /></Shell>;
+
+  if (verifyEmail) return <Shell><VerifyEmail embedded email={verifyEmail} onVerified={() => setVerifyEmail(null)} /></Shell>;
 
   return (
     <Shell>
@@ -66,6 +70,7 @@ function Connect() {
               setBusy(true);
               try {
                 const r = await approve({ data: { appId, origin, challenge } });
+                if (r.needsVerification) { setVerifyEmail(r.email); return; }
                 reply(origin, { type: "code", code: r.code, address: r.address });
                 window.close();
               } catch (e) {

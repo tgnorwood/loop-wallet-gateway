@@ -2,8 +2,8 @@
 // time per signer (operator:<network> or wallet:<id>), different signers in parallel.
 // Server-only; import dynamically inside handlers.
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
-import { decryptSecret, sha256Hex } from "./crypto";
-import { audit } from "./service.server";
+import { openKey, sha256Hex } from "./crypto";
+import { audit, rateLimit } from "./service.server";
 import {
   MAX_RETRIES,
   WEBHOOK_MAX_AGE_MS,
@@ -59,7 +59,7 @@ export function txDto(t: TxRow) {
 
 /** Accept: idempotency check, insert as queued. `request._r` holds resolved addresses for the worker. */
 export async function enqueue(p: {
-  appId: string; network: string; type: string; idempotencyKey: string; signerKey: string; walletId?: string | null;
+  appId: string; network: string; type: string; idempotencyKey: string; signerKey: string | (() => Promise<string>); walletId?: string | null;
   request: Record<string, unknown>; resolved: Record<string, unknown>;
 }) {
   const requestHash = await sha256Hex(stableJson({ type: p.type, network: p.network, ...p.request }));
@@ -67,11 +67,12 @@ export async function enqueue(p: {
   const d = idempotencyDecision(existing as TxRow | null, requestHash);
   if (d === "replay") return { tx: existing as unknown as TxRow, replay: true };
   if (d === "conflict") throw new EngineError(409, "IDEMPOTENCY_CONFLICT", "This Idempotency-Key was already used for a different request");
+  const signerKey = typeof p.signerKey === "function" ? await p.signerKey() : p.signerKey;
   const { data, error } = await db
     .from("transactions")
     .insert({
       app_id: p.appId, network: p.network, type: p.type, idempotency_key: p.idempotencyKey, request_hash: requestHash,
-      request: { ...p.request, _r: p.resolved } as never, signer_key: p.signerKey, wallet_id: p.walletId ?? null,
+      request: { ...p.request, _r: p.resolved } as never, signer_key: signerKey, wallet_id: p.walletId ?? null,
     })
     .select("*")
     .single();
@@ -93,10 +94,8 @@ export async function getTx(id: string) {
 
 async function walletSigner(walletId: string) {
   const { data: w } = await db.from("wallets").select("id,address,public_key,class_hash,encrypted_private_key,deployed").eq("id", walletId).single();
-  const key = process.env["WALLET_ENCRYPTION_KEY"];
-  if (!key) throw new Error("WALLET_ENCRYPTION_KEY not configured");
   if (!isGasFreeClass(w!.class_hash)) throw new Error(LEGACY_CLASS_MESSAGE);
-  return { w: w!, signer: { address: w!.address, publicKey: w!.public_key, classHash: w!.class_hash, privateKey: await decryptSecret(w!.encrypted_private_key, key) } };
+  return { w: w!, signer: { address: w!.address, publicKey: w!.public_key, classHash: w!.class_hash, privateKey: await openKey(w!.encrypted_private_key) } };
 }
 
 /** Build + submit one claimed transaction. Returns quickly once the chain has the tx hash. */
@@ -182,6 +181,7 @@ async function fail(t: TxRow, err: unknown) {
   if (submissionNeedsReconciliation((err as { code?: string })?.code, mapped.retry)) {
     await db.from("transactions").update({ error_code: "SUBMISSION_UNKNOWN", error_message: "Submission outcome unknown; check the chain before retrying. " + msg }).eq("id", t.id);
     await audit({ app_id: t.app_id, wallet_id: t.wallet_id, action: "tx_submission_unknown", details: { transaction_id: t.id, error: msg } });
+    await alertAdmins("unknown", `Transaction ${t.type} needs a decision`, `Transaction ${t.id} (${t.type}) was handed to the chain but the reply was lost, so its signer lane (${t.signer_key}) is paused until you resolve it on the dashboard.\n\nError: ${msg}`);
     return;
   }
   const { data } = await db.from("transactions").update({ status: "failed", error_code: mapped.code, error_message: msg }).eq("id", t.id).select("*").single();
@@ -200,16 +200,18 @@ async function finalize(t: TxRow, events: { from_address: string; keys: string[]
   switch (t.type) {
     case "token.create": {
       const address = relayOut["tokenAddress"] ?? core.addressFromEvents(events, c.tokenFactory);
-      const { data } = await db.from("tokens").insert({ app_id: t.app_id, network: t.network, address, name: r["name"]!, symbol: r["symbol"]!, swappable: r["swappable"] === "true", created_tx: t.id }).select("id").single();
+      let { data } = await db.from("tokens").insert({ app_id: t.app_id, network: t.network, address, name: r["name"]!, symbol: r["symbol"]!, swappable: r["swappable"] === "true", created_tx: t.id }).select("id").single();
+      if (!data && address) data = (await db.from("tokens").select("id").eq("network", t.network).eq("address", address).maybeSingle()).data; // finalize being retried
       Object.assign(result, { tokenId: data?.id, address });
       break;
     }
     case "collection.create": {
       const address = relayOut["collectionAddress"] ?? core.addressFromEvents(events, c.nftFactory);
-      const { data } = await db.from("collections").insert({
+      let { data } = await db.from("collections").insert({
         app_id: t.app_id, network: t.network, address, name: r["name"]!, symbol: r["symbol"]!, owner_wallet_id: r["ownerWalletId"]!,
         royalty_receiver: r["royaltyReceiver"] ?? null, royalty_bps: Number(r["royaltyBps"] ?? 0), created_tx: t.id,
       }).select("id").single();
+      if (!data && address) data = (await db.from("collections").select("id").eq("network", t.network).eq("address", address).maybeSingle()).data; // finalize being retried
       Object.assign(result, { collectionId: data?.id, address });
       break;
     }
@@ -270,13 +272,23 @@ async function checkSubmitted(t: TxRow) {
     }
     return;
   }
-  if (rec.state === "reverted") {
-    const m = mapChainError(rec.reason, t.type);
-    const { data } = await db.from("transactions").update({ status: "failed", error_code: m.code, error_message: rec.reason.slice(0, 500) }).eq("id", t.id).select("*").single();
-    if (data) await queueWebhook(data as unknown as TxRow);
-    return;
+  // Many workers can see the same receipt at once (every API call runs one). Exactly one wins this update and
+  // applies the effects; the rest stop here, so nothing is recorded or sent twice.
+  const { data: locked } = await db.from("transactions").update({ status: "finalizing", next_attempt_at: new Date().toISOString() }).eq("id", t.id).eq("status", "submitted").select("*").maybeSingle();
+  if (!locked) return;
+  const mine = locked as unknown as TxRow;
+  try {
+    if (rec.state === "reverted") {
+      const m = mapChainError(rec.reason, mine.type);
+      const { data } = await db.from("transactions").update({ status: "failed", error_code: m.code, error_message: rec.reason.slice(0, 500) }).eq("id", mine.id).select("*").single();
+      if (data) await queueWebhook(data as unknown as TxRow);
+      return;
+    }
+    await finalize(mine, rec.events);
+  } catch (e) {
+    await db.from("transactions").update({ status: "submitted" }).eq("id", mine.id).eq("status", "finalizing"); // try again next pass
+    throw e;
   }
-  await finalize(t, rec.events);
 }
 
 /** One worker pass: confirm submitted txs, recover stale claims, submit next per signer, deliver webhooks. */
@@ -285,8 +297,11 @@ export async function tick(opts: { maxClaims?: number; budgetMs?: number } = {})
   const budget = opts.budgetMs ?? 20_000;
   const stats = { checked: 0, submitted: 0, failed: 0, webhooks: 0 };
 
-  await db.from("transactions").update({ error_code: "SUBMISSION_UNKNOWN", error_message: "Submission response was lost; check the chain before retrying. Do not resend." })
-    .eq("status", "processing").is("tx_hash", null).lt("started_at", new Date(Date.now() - 5 * 60_000).toISOString());
+  const { data: lost } = await db.from("transactions").update({ error_code: "SUBMISSION_UNKNOWN", error_message: "Submission response was lost; check the chain before retrying. Do not resend." })
+    .eq("status", "processing").is("tx_hash", null).or("error_code.is.null,error_code.neq.SUBMISSION_UNKNOWN").lt("started_at", new Date(Date.now() - 5 * 60_000).toISOString()).select("id,type,signer_key");
+  for (const l of lost ?? []) await alertAdmins("unknown", `Transaction ${l.type} needs a decision`, `Transaction ${l.id} (${l.type}) has been "processing" for over 5 minutes without a transaction hash, so signer lane ${l.signer_key} is paused until you resolve it on the dashboard.`);
+  // A worker that died mid-finalize leaves the row "finalizing"; hand it back after two minutes.
+  await db.from("transactions").update({ status: "submitted" }).eq("status", "finalizing").lt("next_attempt_at", new Date(Date.now() - 2 * 60_000).toISOString());
 
   const { data: subs } = await db.from("transactions").select("*").eq("status", "submitted").order("submitted_at").limit(25);
   await Promise.allSettled(((subs ?? []) as unknown as TxRow[]).map(async (t) => { stats.checked++; await checkSubmitted(t); }));
@@ -313,11 +328,61 @@ export async function waitForTx(id: string, maxMs = 45_000) {
   return t;
 }
 
+/** Worker pass that keeps going: confirms, submits the next item per lane, repeats until the queue is empty or the budget is spent. */
+export async function drain(opts: { budgetMs: number; maxClaims?: number; pauseMs?: number }) {
+  const started = Date.now();
+  const pause = opts.pauseMs ?? 2500;
+  const total = { rounds: 0, checked: 0, submitted: 0, failed: 0, webhooks: 0 };
+  while (total.rounds < 12) {
+    const s = await tick({ maxClaims: opts.maxClaims ?? 40, budgetMs: 15_000 });
+    total.rounds++; total.checked += s.checked; total.submitted += s.submitted; total.failed += s.failed; total.webhooks += s.webhooks;
+    if (Date.now() - started + pause + 4000 > opts.budgetMs) break;
+    const { count } = await db.from("transactions").select("id", { count: "exact", head: true }).in("status", ["queued", "processing", "submitted", "finalizing"]);
+    if (!count) break;
+    await new Promise((r) => setTimeout(r, pause));
+  }
+  return total;
+}
+
+/** Admin decision on a transaction stuck as SUBMISSION_UNKNOWN (it blocks its signer lane until resolved). */
+export async function resolveTransaction(id: string, action: "attach_hash" | "mark_failed" | "requeue", opts: { txHash?: string; note?: string }, admin: string) {
+  const t = await getTx(id);
+  if (!t) throw new EngineError(404, "NOT_FOUND", "transaction not found");
+  if (!["processing", "submitted", "finalizing"].includes(t.status)) throw new EngineError(409, "NOT_RESOLVABLE", `transaction is ${t.status}`);
+  let next: Record<string, unknown>;
+  if (action === "attach_hash") {
+    if (!opts.txHash || !/^0x[0-9a-fA-F]{1,64}$/.test(opts.txHash)) throw new EngineError(400, "VALIDATION", "a transaction hash is required");
+    next = { status: "submitted", tx_hash: opts.txHash, submitted_at: new Date().toISOString(), error_code: null, error_message: null };
+  } else if (action === "requeue") {
+    if (t.tx_hash) throw new EngineError(409, "NOT_RESOLVABLE", "this transaction has a hash; attach it instead of sending again");
+    next = { status: "queued", started_at: null, error_code: null, error_message: null, next_attempt_at: null };
+  } else {
+    next = { status: "failed", error_code: "RESOLVED_FAILED", error_message: (opts.note ?? "Marked failed by an admin after checking the chain").slice(0, 500) };
+  }
+  const { data } = await db.from("transactions").update(next as never).eq("id", id).eq("status", t.status).select("*").maybeSingle();
+  if (!data) throw new EngineError(409, "NOT_RESOLVABLE", "transaction changed while resolving; reload and try again");
+  await audit({ app_id: t.app_id, wallet_id: t.wallet_id, action: `tx_resolved:${action}`, details: { transaction_id: id, admin, tx_hash: opts.txHash ?? null } });
+  if (action === "mark_failed") await queueWebhook(data as unknown as TxRow);
+  return txDto(data as unknown as TxRow);
+}
+
+/** Emails ALERT_EMAIL (comma separated) at most once per 30 minutes per kind. Never throws. */
+export async function alertAdmins(kind: string, subject: string, text: string) {
+  try {
+    if (!process.env["ALERT_EMAIL"]) return;
+    await rateLimit(`alert:${kind}`, 1, 30 * 60_000);
+    const { sendAlertEmail } = await import("./email.server");
+    await sendAlertEmail(subject, text);
+  } catch { /* rate limited or email not configured: the dashboard still shows it */ }
+}
+
 // ---------------- webhooks ----------------
 async function queueWebhook(t: TxRow) {
   const { data: app } = await db.from("registered_apps").select("webhook_url").eq("id", t.app_id).maybeSingle();
   if (!app?.webhook_url) return;
   const event = t.status === "confirmed" ? "transaction.confirmed" : "transaction.failed";
+  const { data: dup } = await db.from("webhook_deliveries").select("id").eq("transaction_id", t.id).eq("event", event).limit(1).maybeSingle();
+  if (dup) return;
   await db.from("webhook_deliveries").insert({ app_id: t.app_id, transaction_id: t.id, event, payload: { event, transaction: txDto(t) } as never });
 }
 
@@ -331,6 +396,9 @@ export async function deliverWebhooks(limit = 20) {
   const { data: rows } = await db.from("webhook_deliveries").select("*").eq("status", "pending").lte("next_attempt_at", new Date().toISOString()).order("created_at").limit(limit);
   let n = 0;
   for (const d of rows ?? []) {
+    // Claim the delivery first (push its next attempt two minutes out) so parallel workers don't send it twice.
+    const { data: claimed } = await db.from("webhook_deliveries").update({ next_attempt_at: new Date(Date.now() + 2 * 60_000).toISOString() }).eq("id", d.id).eq("status", "pending").eq("next_attempt_at", d.next_attempt_at).select("id");
+    if (!claimed?.length) continue;
     const { data: app } = await db.from("registered_apps").select("webhook_url,webhook_secret").eq("id", d.app_id).maybeSingle();
     if (!app?.webhook_url || !app.webhook_secret) { await db.from("webhook_deliveries").update({ status: "skipped" }).eq("id", d.id); continue; }
     const body = JSON.stringify(d.payload);

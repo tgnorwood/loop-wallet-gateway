@@ -4,7 +4,8 @@ import { z } from "zod";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { appFromKey, audit, rateLimit, ApiError } from "./service.server";
 import { EngineError, enqueue, getTx, tick, txDto, waitForTx, type TxRow } from "./engine.server";
-import { encryptSecret } from "./crypto";
+import { sealKey } from "./crypto";
+import { emailVerifiedEffective, isOperatorKey, laneKey, laneOf, normalizeEmail, pickLane, queueFull, retryAfterForQueue } from "./rules";
 import { generateWallet } from "./starknet";
 import { canRemoveMinter, capExceeded, fromBaseUnits, kindAllowed, sameAddress, signerKeyOperator, signerKeyWallet, swapPairAllowed, toBaseUnits } from "./chain-rules";
 
@@ -23,9 +24,23 @@ const cors = {
   "Access-Control-Allow-Methods": "GET,POST,PATCH,DELETE,OPTIONS",
   "Access-Control-Allow-Headers": "authorization,content-type,idempotency-key,x-app-key",
 };
-const json = (body: unknown, status = 200) => Response.json(body, { status, headers: cors });
-const err = (status: number, code: string, message?: string, details?: Record<string, unknown>) =>
-  json({ error: { code, message: message ?? code, details: details ?? {} } }, status);
+const json = (body: unknown, status = 200, extra: Record<string, string> = {}) => Response.json(body, { status, headers: { ...cors, "Access-Control-Expose-Headers": "retry-after", ...extra } });
+const err = (status: number, code: string, message?: string, details?: Record<string, unknown>) => {
+  const ra = Number(details?.["retry_after"]);
+  return json({ error: { code, message: message ?? code, details: details ?? {} } }, status, ra > 0 ? { "Retry-After": String(Math.ceil(ra)) } : {});
+};
+
+/** Run `fn` over `items` with at most `limit` in flight, so one request can't flood the RPC node. */
+async function mapLimit<T, R>(items: T[], limit: number, fn: (x: T) => Promise<R>): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) { const i = next++; out[i] = await fn(items[i]!); }
+  }));
+  return out;
+}
+const balanceCache = new Map<string, { at: number; value: unknown }>();
+const num = (name: string, dflt: number) => { const n = Number(process.env[name]); return Number.isFinite(n) && n > 0 ? n : dflt; };
 
 export function preflightV1() {
   return new Response(null, { status: 204, headers: cors });
@@ -82,11 +97,42 @@ async function capCheck(ctx: Ctx, types: string[], requestRaw: bigint, cap: numb
   if (capExceeded(used, requestRaw, cap)) throw new EngineError(429, "CAP_EXCEEDED", "daily cap for this app reached", { cap: String(cap), used: fromBaseUnits(used) });
 }
 
+/** Number of parallel operator signers. Sponsored (outside-execution) transactions don't use the operator's on-chain nonce, so they can run side by side. */
+const operatorLanes = () => Math.min(32, Math.round(num("OPERATOR_LANES", 6)));
+
+/** Least-loaded operator lane for this network. */
+async function chooseLane(network: string) {
+  const lanes = operatorLanes();
+  const { data } = await db.from("transactions").select("signer_key").like("signer_key", `operator:${network}%`).in("status", ["queued", "processing", "submitted", "finalizing"]).limit(2000);
+  const load = new Array<number>(lanes).fill(0);
+  for (const r of data ?? []) { const l = laneOf(r.signer_key, network); if (l !== null && l < lanes) load[l]!++; }
+  return laneKey(network, pickLane(load));
+}
+
+/** Refuse new work (429 + Retry-After) when one app already has too much waiting, or one wallet is spamming sponsored transactions. */
+async function admit(ctx: Ctx, walletId: string | null) {
+  const { count } = await db.from("transactions").select("id", { count: "exact", head: true }).eq("app_id", ctx.app.id).in("status", ["queued", "processing", "submitted", "finalizing"]);
+  const cap = num("MAX_QUEUED_PER_APP", 300);
+  if (queueFull(count ?? 0, cap)) {
+    throw new EngineError(429, "QUEUE_FULL", "this app already has too many transactions waiting; retry shortly", { queued: count ?? 0, cap, retry_after: retryAfterForQueue(count ?? 0, operatorLanes()) });
+  }
+  if (walletId) {
+    const since = new Date(Date.now() - 24 * 3600_000).toISOString();
+    const { count: day } = await db.from("transactions").select("id", { count: "exact", head: true }).eq("wallet_id", walletId).gte("created_at", since);
+    const walletCap = num("MAX_TX_PER_WALLET_PER_DAY", 500);
+    if ((day ?? 0) >= walletCap) throw new EngineError(429, "WALLET_DAILY_LIMIT", "this wallet reached its daily transaction limit", { cap: walletCap, retry_after: 3600 });
+  }
+}
+
 async function queue(ctx: Ctx, type: string, signerKey: string, walletId: string | null, request: Record<string, unknown>, resolved: Record<string, unknown>) {
   if (!ctx.idem) throw new EngineError(400, "VALIDATION", "Idempotency-Key header is required");
   let queued: Awaited<ReturnType<typeof enqueue>>;
   try {
-    queued = await enqueue({ appId: ctx.app.id, network: ctx.network, type, idempotencyKey: ctx.idem, signerKey, walletId, request, resolved });
+    // Limits only apply to brand-new requests: replaying an Idempotency-Key never gets refused.
+    queued = await enqueue({
+      appId: ctx.app.id, network: ctx.network, type, idempotencyKey: ctx.idem, walletId, request, resolved,
+      signerKey: async () => { await admit(ctx, walletId); return isOperatorKey(signerKey) ? chooseLane(ctx.network) : signerKey; },
+    });
   } catch (e) {
     const k = e as { status?: number; code?: string; message?: string };
     if (k.code === "IDEMPOTENCY_CONFLICT") return err(409, k.code, k.message);
@@ -94,7 +140,7 @@ async function queue(ctx: Ctx, type: string, signerKey: string, walletId: string
   }
   const { tx, replay } = queued;
   let final: TxRow | null = tx;
-  if (!replay) await tick({ maxClaims: 5, budgetMs: 10_000 }).catch((e) => console.error("tick", e));
+  if (!replay) await tick({ maxClaims: operatorLanes() + 4, budgetMs: 10_000 }).catch((e) => console.error("tick", e));
   if (ctx.url.searchParams.get("wait") === "true") final = await waitForTx(tx.id);
   else final = await getTx(tx.id);
   return json(txDto(final ?? tx), replay ? 200 : 202);
@@ -106,6 +152,9 @@ function walletDto(w: { id: string; external_id: string | null; kind: string; la
 
 // ------------------------------------------------------------------ handlers
 async function linkToApp(ctx: Ctx, externalId: string, walletId: string, how: string) {
+  // This is only reached after the email was proven (emailed code, or Google via a trusted app).
+  const { evictUnverifiedControllers } = await import("./service.server");
+  await evictUnverifiedControllers(walletId, { appId: ctx.app.id, network: ctx.network, externalId }, ctx.ip, how);
   await db.from("wallet_app_links").upsert({ app_id: ctx.app.id, network: ctx.network, external_id: externalId, wallet_id: walletId });
   await audit({ app_id: ctx.app.id, wallet_id: walletId, action: "wallet_linked_by_email", ip: ctx.ip, details: { external_id: externalId, how } });
   const { data: w } = await db.from("wallets").select("*").eq("id", walletId).single();
@@ -124,27 +173,37 @@ async function verifyWalletLink(ctx: Ctx) {
   }
 }
 
+/** A live wallet on this network that carries the email (current or retired). Plain equality filters only. */
+async function walletByEmail(network: string, email: string) {
+  for (const col of ["email", "retired_email"] as const) {
+    const { data } = await db.from("wallets").select("*").eq("network", network).is("retired_at", null).eq(col, email).limit(1).maybeSingle();
+    if (data) return data;
+  }
+  return null;
+}
+
 async function createWallet(ctx: Ctx) {
   const b = parse(z.object({ externalId: str(200), kind: z.enum(["user", "collection_owner", "treasury"]).default("user"), label: z.string().max(200).optional(), email: z.string().email().max(254).optional(), emailVerified: z.boolean().optional(), signInMethod: z.enum(["google", "password", "other"]).optional() }), ctx.body);
   const { data: linkRow } = await db.from("wallet_app_links").select("wallet_id").eq("app_id", ctx.app.id).eq("network", ctx.network).eq("external_id", b.externalId).maybeSingle();
   if (linkRow) { const { data: lw } = await db.from("wallets").select("*").eq("id", linkRow.wallet_id).single(); return json({ ...walletDto(lw!), externalId: b.externalId, reused: true }, 200); }
   const { data: existing } = await db.from("wallets").select("*").eq("app_id", ctx.app.id).eq("network", ctx.network).eq("external_id", b.externalId).maybeSingle();
   if (existing) return json(walletDto(existing), 200);
+  const trusted = !!(ctx.app as { trusted_oauth?: boolean }).trusted_oauth;
   // Same email = same wallet across apps, but only after proof: an emailed code, unless the user came via Google and the admin trusts this app for Google.
   if (b.email && b.kind === "user") {
-    const em = b.email.toLowerCase();
-    const { data: same } = await db.from("wallets").select("*").eq("network", ctx.network).is("retired_at", null).or(`email.eq.${em},retired_email.eq.${em}`).limit(1).maybeSingle();
+    const em = normalizeEmail(b.email);
+    const same = await walletByEmail(ctx.network, em);
     if (same) {
       const { needsEmailProof } = await import("./rules");
       const method = b.signInMethod ?? "other";
-      if (needsEmailProof({ walletExists: true, alreadyLinked: false, method, appTrustedGoogle: !!(ctx.app as { trusted_oauth?: boolean }).trusted_oauth })) {
+      if (needsEmailProof({ walletExists: true, alreadyLinked: false, method, appTrustedGoogle: trusted })) {
         const { startEmailProof } = await import("./service.server");
         try {
           const verificationId = await startEmailProof(same.id, { purpose: "app_link", appId: ctx.app.id, externalId: b.externalId, network: ctx.network }, ctx.ip);
           return json({ status: "verification_required", verificationId, message: "A 6-digit code was emailed. Send it to POST /v1/wallets/verify." }, 202);
         } catch (e) {
-          const ae = e as { status?: number; code?: string; message: string };
-          return err(ae.status ?? 400, ae.code === "resend_cooldown" ? "RATE_LIMITED" : "VALIDATION", ae.message);
+          const ae = e as { status?: number; code?: string; message: string; extra?: Record<string, unknown> };
+          return err(ae.status ?? 400, ae.code === "resend_cooldown" || ae.code === "rate_limited" ? "RATE_LIMITED" : "VALIDATION", ae.message, ae.extra);
         }
       }
       return json(await linkToApp(ctx, b.externalId, same.id, "google"), 200);
@@ -153,17 +212,24 @@ async function createWallet(ctx: Ctx) {
   const key = process.env["WALLET_ENCRYPTION_KEY"];
   if (!key) throw new EngineError(503, "CONFIG_ERROR", "wallet key not configured");
   const w = generateWallet();
-  let email: string | null = b.email?.toLowerCase() ?? null;
-  if (email) { const { data: taken } = await db.from("wallets").select("id").eq("email", email).maybeSingle(); if (taken) email = null; }
-  const { data, error } = await db.from("wallets").insert({
-    app_id: ctx.app.id, network: ctx.network, external_id: b.externalId, kind: b.kind, label: b.label ?? null, email, email_verified_at: email && b.emailVerified ? new Date().toISOString() : null,
-    address: w.address, public_key: w.publicKey, class_hash: w.classHash, encrypted_private_key: await encryptSecret(w.privateKey, key), created_by_app: ctx.app.id,
-  }).select("*").single();
-  if (error) {
-    if (error.code === "23505") { const { data: again } = await db.from("wallets").select("*").eq("app_id", ctx.app.id).eq("network", ctx.network).eq("external_id", b.externalId).single(); return json(walletDto(again!), 200); }
-    throw error;
+  let email: string | null = b.email ? normalizeEmail(b.email) : null;
+  if (email) { const { data: taken } = await db.from("wallets").select("id").eq("email", email).eq("network", ctx.network).maybeSingle(); if (taken) email = null; }
+  // The email is stored so one person can later be matched to one wallet, but it only counts as verified when this
+  // app is trusted to say so. Otherwise whoever proves the email later takes the wallet over (see linkToApp).
+  const proven = !!email && emailVerifiedEffective(b.emailVerified, trusted);
+  const sealed = await sealKey(w.privateKey);
+  const row = (e: string | null) => ({
+    app_id: ctx.app.id, network: ctx.network, external_id: b.externalId, kind: b.kind, label: b.label ?? null, email: e, email_verified_at: e && proven ? new Date().toISOString() : null,
+    address: w.address, public_key: w.publicKey, class_hash: w.classHash, encrypted_private_key: sealed, created_by_app: ctx.app.id,
+  });
+  let { data, error } = await db.from("wallets").insert(row(email)).select("*").single();
+  if (error?.code === "23505") {
+    const { data: again } = await db.from("wallets").select("*").eq("app_id", ctx.app.id).eq("network", ctx.network).eq("external_id", b.externalId).maybeSingle();
+    if (again) return json(walletDto(again), 200);
+    if (email) ({ data, error } = await db.from("wallets").insert(row(null)).select("*").single()); // email already used by another row: keep the wallet, drop the email
   }
-  await audit({ app_id: ctx.app.id, wallet_id: data.id, action: "wallet_created", ip: ctx.ip, details: { kind: b.kind } });
+  if (error || !data) throw error ?? new Error("wallet insert failed");
+  await audit({ app_id: ctx.app.id, wallet_id: data.id, action: "wallet_created", ip: ctx.ip, details: { kind: b.kind, email_verified: proven } });
   return json(walletDto(data), 201);
 }
 
@@ -172,11 +238,17 @@ async function balances(ctx: Ctx, id: string) {
   const core = await import("./core/core");
   const { data: toks } = await db.from("tokens").select("id,symbol,address,decimals").eq("network", w.network).not("address", "is", null).limit(100);
   const r = core.readers(w.network);
-  const out = await Promise.all((toks ?? []).map(async (t) => {
+  const cacheKey = `bal:${w.network}:${w.address}`;
+  const hit = balanceCache.get(cacheKey);
+  if (hit && Date.now() - hit.at < 5_000) return json(hit.value);
+  const out = await mapLimit(toks ?? [], 8, async (t) => {
     try { const raw = await r.tokenBalance(t.address!, w.address); return { tokenId: t.id, symbol: t.symbol, address: t.address, balance: fromBaseUnits(raw, t.decimals), balanceRaw: raw }; }
     catch { return null; }
-  }));
-  return json({ walletId: w.id, address: w.address, tokens: out.filter((x) => x && x.balanceRaw !== "0") });
+  });
+  const value = { walletId: w.id, address: w.address, tokens: out.filter((x) => x && x.balanceRaw !== "0") };
+  balanceCache.set(cacheKey, { at: Date.now(), value });
+  if (balanceCache.size > 500) balanceCache.delete(balanceCache.keys().next().value!);
+  return json(value);
 }
 
 async function walletNfts(ctx: Ctx, id: string) {
@@ -184,11 +256,11 @@ async function walletNfts(ctx: Ctx, id: string) {
   const core = await import("./core/core");
   const { data } = await db.from("nfts").select("collection_id,token_id,token_uri,attributes,media,frozen,collections(address)").eq("owner_wallet_id", w.id).limit(100);
   const r = core.readers(w.network);
-  const verified = await Promise.all((data ?? []).map(async (n) => {
+  const verified = await mapLimit(data ?? [], 8, async (n) => {
     const col = (n.collections as unknown as { address: string } | null)?.address;
     try { if (col && !sameAddress(await r.nftOwner(col, BigInt(n.token_id)), w.address)) return null; } catch { /* keep DB answer if RPC fails */ }
     return { collectionId: n.collection_id, tokenId: n.token_id, tokenUri: n.token_uri, attributes: n.attributes, media: n.media, frozen: n.frozen };
-  }));
+  });
   return json(verified.filter(Boolean));
 }
 
@@ -229,7 +301,8 @@ export async function dispatchV1(request: Request, path: string): Promise<Respon
     let app: App;
     try { app = (await appFromKey(bearer)) as App; } catch { return err(401, "UNAUTHORIZED", "missing or invalid app API key"); }
     if (!app.api_enabled) return err(403, "UNAUTHORIZED", "API access is disabled for this app");
-    try { await rateLimit(`v1:${app.id}`, app.rate_limit_per_min ?? 60, 60_000); } catch { return err(429, "RATE_LIMITED", "too many requests"); }
+    try { await rateLimit(`v1:${app.id}`, app.rate_limit_per_min ?? 60, 60_000, { failOpen: true }); }
+    catch (e) { return err(429, "RATE_LIMITED", "too many requests; wait for Retry-After seconds", { retry_after: (e as { extra?: { retry_after?: number } }).extra?.retry_after ?? 5 }); }
 
     const body = m === "GET" || m === "DELETE" ? {} : ((await request.json().catch(() => ({}))) as Record<string, unknown>);
     const network = String(url.searchParams.get("network") ?? body["network"] ?? "sepolia");

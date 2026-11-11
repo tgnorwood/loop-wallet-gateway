@@ -20,3 +20,17 @@ export async function sendOtpEmail(to: string, code: string, idempotencyKey: str
   }
   return { ok: true as const };
 }
+
+/** Plain operational alert to ALERT_EMAIL (comma separated). */
+export async function sendAlertEmail(subject: string, text: string) {
+  const key = process.env["RESEND_API_KEY"];
+  const to = (process.env["ALERT_EMAIL"] ?? "").split(",").map((x) => x.trim()).filter(Boolean);
+  if (!key || !to.length) return { ok: false as const, error: "alerts not configured" };
+  const from = process.env["RESEND_FROM_ADDRESS"] || "Loop Wallet <hello@loop.do>";
+  const res = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ from, to, subject: `[Loop Wallet] ${subject}`.slice(0, 200), text: text.slice(0, 4000), tags: [{ name: "kind", value: "alert" }] }),
+  });
+  return res.ok ? { ok: true as const } : { ok: false as const, error: `Resend ${res.status}` };
+}

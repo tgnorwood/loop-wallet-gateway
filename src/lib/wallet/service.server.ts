@@ -1,18 +1,21 @@
 // Server-only wallet service. Import dynamically from inside handlers.
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { generateWallet, signTypedMessage, STRK_TOKEN } from "./starknet";
-import { decryptSecret, encryptSecret, randomOtp, randomToken, sha256B64Url, sha256Hex } from "./crypto";
+import { openKey, randomOtp, randomToken, sealKey, sha256B64Url, sha256Hex } from "./crypto";
 import {
   AUTH_CODE_TTL_MS,
+  OTP_MAX_ATTEMPTS,
   OTP_TTL_MS,
   SESSION_TTL_MS,
   checkOtpUsable,
   isOriginAllowed,
   isSessionActive,
   resendWaitSeconds,
-  canAttachEmail,
   canRetireWallet,
   needsEmailProof,
+  normalizeEmail,
+  shouldEvictControllers,
+  isProofMethod,
 } from "./rules";
 
 const db = supabaseAdmin;
@@ -26,12 +29,6 @@ type App = {
   sandbox: boolean;
   revoked_at: string | null;
 };
-
-function encKey() {
-  const k = process.env["WALLET_ENCRYPTION_KEY"];
-  if (!k) throw new Error("WALLET_ENCRYPTION_KEY missing");
-  return k;
-}
 
 export class ApiError extends Error {
   constructor(public status: number, public code: string, message?: string, public extra?: Record<string, unknown>) {
@@ -57,15 +54,45 @@ export async function audit(e: {
   });
 }
 
-export async function rateLimit(key: string, max: number, windowMs: number) {
-  const { data } = await db.from("rate_limits").select("*").eq("key", key).maybeSingle();
-  const now = Date.now();
-  if (!data || now - new Date(data.window_start).getTime() > windowMs) {
-    await db.from("rate_limits").upsert({ key, count: 1, window_start: new Date().toISOString() });
-    return;
+let rateLimitRpc: "unknown" | "yes" | "no" = "unknown";
+
+/**
+ * Fixed-window limiter. Counts atomically: through the database function `rate_limit_hit` when it
+ * exists, otherwise with compare-and-set updates, so a burst of parallel requests cannot slip past.
+ * `failOpen` (for the per-app API limiter) lets a request through if contention exhausts the retries;
+ * security limiters (codes, sign-ins) fail closed.
+ */
+export async function rateLimit(key: string, max: number, windowMs: number, opts: { failOpen?: boolean } = {}) {
+  const tooMany = (retryAfter: number) => new ApiError(429, "rate_limited", "Too many requests, slow down.", { retry_after: Math.max(1, retryAfter) });
+  if (rateLimitRpc !== "no") {
+    const { data, error } = await (db.rpc as unknown as (n: string, a: object) => Promise<{ data: { allowed: boolean; retry_after: number }[] | null; error: { code?: string; message: string } | null }>)("rate_limit_hit", { _key: key, _max: max, _window_ms: windowMs });
+    if (!error && data?.[0]) {
+      rateLimitRpc = "yes";
+      if (!data[0].allowed) throw tooMany(data[0].retry_after);
+      return;
+    }
+    if (error && /could not find|does not exist|PGRST202|42883/i.test(`${error.code ?? ""} ${error.message}`)) rateLimitRpc = "no";
+    else if (error) console.error("rate_limit_hit failed", error.message);
   }
-  if (data.count >= max) throw new ApiError(429, "rate_limited", "Too many requests, slow down.");
-  await db.from("rate_limits").update({ count: data.count + 1 }).eq("key", key);
+  for (let i = 0; i < 6; i++) {
+    const { data } = await db.from("rate_limits").select("*").eq("key", key).maybeSingle();
+    const now = Date.now();
+    if (!data) {
+      const { error } = await db.from("rate_limits").insert({ key, count: 1, window_start: new Date().toISOString() });
+      if (!error) return;
+      continue; // someone created it a moment ago: read again
+    }
+    if (now - new Date(data.window_start).getTime() > windowMs) {
+      const { data: won } = await db.from("rate_limits").update({ count: 1, window_start: new Date().toISOString() }).eq("key", key).eq("window_start", data.window_start).select("key");
+      if (won?.length) return;
+      continue;
+    }
+    if (data.count >= max) throw tooMany(Math.ceil((new Date(data.window_start).getTime() + windowMs - now) / 1000));
+    const { data: won } = await db.from("rate_limits").update({ count: data.count + 1 }).eq("key", key).eq("count", data.count).select("key");
+    if (won?.length) return;
+  }
+  if (opts.failOpen) return;
+  throw tooMany(1);
 }
 
 // ---------- apps ----------
@@ -100,8 +127,74 @@ export async function createApp(input: { name: string; allowed_origins: string[]
   return { id: data.id, app_key: raw };
 }
 
+// ---------- one-time codes ----------
+type Verification = { id: string; wallet_id: string; app_id: string | null; code_hash: string; attempts: number; expires_at: string; consumed_at: string | null; last_sent_at: string; purpose?: string; user_id?: string | null; external_id?: string | null; network?: string | null };
+
+/**
+ * Checks a code with a hard cap of OTP_MAX_ATTEMPTS guesses per code, even when guesses arrive in
+ * parallel: each guess first "spends" an attempt with a compare-and-set, and only the request that
+ * won that update is allowed to compare the code.
+ */
+async function spendAttemptAndCheck(v: Verification, code: string, wallet: { id: string }, app_id: string | null, ip: string | null, purpose: string) {
+  let cur = v;
+  for (let i = 0; i < 8; i++) {
+    const state = checkOtpUsable(cur);
+    if (state !== "ok") throw new ApiError(400, state);
+    const { data: won } = await db.from("wallet_verifications").update({ attempts: cur.attempts + 1 }).eq("id", cur.id).eq("attempts", cur.attempts).is("consumed_at", null).select("*");
+    if (won?.length) {
+      const attemptsAfter = cur.attempts + 1;
+      if ((await sha256Hex(wallet.id + ":" + code.trim())) !== cur.code_hash) {
+        await audit({ wallet_id: wallet.id, app_id, action: "otp_failed", ip, details: { purpose } });
+        throw new ApiError(400, "invalid_code", "Incorrect code", { attempts_left: Math.max(0, OTP_MAX_ATTEMPTS - attemptsAfter) });
+      }
+      const { data: used } = await db.from("wallet_verifications").update({ consumed_at: new Date().toISOString() }).eq("id", cur.id).is("consumed_at", null).select("id");
+      if (!used?.length) throw new ApiError(400, "consumed");
+      return cur;
+    }
+    const { data: fresh } = await db.from("wallet_verifications").select("*").eq("id", cur.id).maybeSingle();
+    if (!fresh) throw new ApiError(400, "no_pending_code");
+    cur = fresh as Verification;
+  }
+  throw new ApiError(429, "rate_limited", "Too many attempts at once, try again.", { retry_after: 2 });
+}
+
+/** Cooldown, per-email and per-IP caps for sending a code. */
+async function guardCodeSend(email: string, ip: string | null) {
+  await rateLimit(`codesend:${normalizeEmail(email)}`, 5, 10 * 60_000);
+  if (ip) await rateLimit(`codesend-ip:${ip}`, 20, 10 * 60_000);
+}
+
+/**
+ * Someone just proved they own this wallet's email. If that email was never proven before, whoever
+ * else got hold of the wallet by merely typing the address in (another app's unverified sign-up, an
+ * unconfirmed portal account) is removed: their sessions end and their app links are dropped. The wallet
+ * itself, and anything in it, stays with the proven owner. Imported Loop Do wallets are left alone.
+ */
+export async function evictUnverifiedControllers(walletId: string, keep: { appId?: string | null; network?: string | null; externalId?: string | null; userId?: string | null }, ip: string | null, via: string) {
+  const { data: w } = await db.from("wallets").select("id,app_id,external_id,user_id,email_verified_at,imported_from").eq("id", walletId).maybeSingle();
+  if (!w || !shouldEvictControllers(w)) {
+    if (w && !w.email_verified_at) await db.from("wallets").update({ email_verified_at: new Date().toISOString() }).eq("id", walletId);
+    return { evicted: false };
+  }
+  await revokeAllSessions(walletId);
+  const { data: links } = await db.from("wallet_app_links").select("app_id,network,external_id").eq("wallet_id", walletId);
+  let removed = 0;
+  for (const l of links ?? []) {
+    if (keep.appId && l.app_id === keep.appId && l.external_id === keep.externalId && (!keep.network || l.network === keep.network)) continue;
+    await db.from("wallet_app_links").delete().eq("wallet_id", walletId).eq("app_id", l.app_id).eq("network", l.network).eq("external_id", l.external_id);
+    removed++;
+  }
+  const patch: Record<string, unknown> = { email_verified_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+  const homeIsKeeper = !!keep.appId && w.app_id === keep.appId && w.external_id === keep.externalId;
+  if (w.app_id && !homeIsKeeper) { patch["app_id"] = null; patch["external_id"] = null; }
+  if (w.user_id && w.user_id !== keep.userId) patch["user_id"] = null;
+  await db.from("wallets").update(patch as never).eq("id", walletId);
+  await audit({ wallet_id: walletId, app_id: keep.appId ?? null, action: "unverified_controllers_removed", ip, details: { via, links_removed: removed, home_app_cleared: "app_id" in patch, portal_user_cleared: "user_id" in patch } });
+  return { evicted: true };
+}
+
 // ---------- wallets ----------
-async function insertWallet(email: string, opts: { user_id?: string; verified?: boolean; method?: string; app_id?: string | null }) {
+async function insertWallet(email: string, opts: { user_id?: string; verified?: boolean; emailProven?: boolean; method?: string; app_id?: string | null }) {
   const w = generateWallet();
   const { data, error } = await db
     .from("wallets")
@@ -111,8 +204,9 @@ async function insertWallet(email: string, opts: { user_id?: string; verified?: 
       address: w.address,
       public_key: w.publicKey,
       class_hash: w.classHash,
-      encrypted_private_key: await encryptSecret(w.privateKey, encKey()),
+      encrypted_private_key: await sealKey(w.privateKey),
       verified: !!opts.verified,
+      email_verified_at: opts.emailProven ? new Date().toISOString() : null,
       verified_method: opts.method ?? null,
       created_by_app: opts.app_id ?? null,
     })
@@ -142,6 +236,7 @@ export async function revokeAllSessions(walletId: string) {
 
 async function sendOtp(wallet: { id: string; email: string | null }, app: App, ip: string | null) {
   if (!wallet.email) throw new ApiError(400, "wallet_has_no_email");
+  await guardCodeSend(wallet.email, ip);
   const code = randomOtp();
   await db.from("wallet_verifications").update({ consumed_at: new Date().toISOString() }).eq("wallet_id", wallet.id).is("consumed_at", null);
   const { data: ver } = await db.from("wallet_verifications").insert({
@@ -156,11 +251,17 @@ async function sendOtp(wallet: { id: string; email: string | null }, app: App, i
   return app.sandbox ? { debug_code: code } : {};
 }
 
-export async function getOrCreate(app: App, input: { email: string; oauth_verified?: boolean | undefined }, ip: string | null, ua: string | null) {
+/**
+ * Legacy email-only sign-in (/wallet/get-or-create). The public routes are retired (410) unless
+ * LEGACY_WALLET_API=on; the developer sandbox still uses this. An email that already has a wallet
+ * always needs an emailed code: no caller-supplied flag can skip it, and the wallet address is not
+ * revealed until the code is proven.
+ */
+export async function getOrCreate(app: App, input: { email: string }, ip: string | null, ua: string | null) {
   if (!app.api_enabled) throw new ApiError(403, "api_disabled");
-  const email = input.email.trim().toLowerCase();
+  const email = normalizeEmail(input.email);
   await rateLimit(`goc:${app.id}:${ip}`, 30, 60_000);
-  const { data: existing } = await db.from("wallets").select("*").eq("email", email).maybeSingle();
+  const { data: existing } = await db.from("wallets").select("*").eq("email", email).is("retired_at", null).limit(1).maybeSingle();
 
   if (!existing) {
     const w = await insertWallet(email, { app_id: app.id });
@@ -169,19 +270,16 @@ export async function getOrCreate(app: App, input: { email: string; oauth_verifi
     return { status: "created", address: w.address, verified: false, ...s };
   }
 
-  if (input.oauth_verified && app.trusted_oauth) {
-    return takeover(existing.id, app.id, "oauth", ip, ua);
-  }
-
   const extra = await sendOtp(existing, app, ip);
-  return { status: "requires_verification", address: existing.address, ...extra };
+  return { status: "requires_verification", ...extra };
 }
 
 export async function takeover(walletId: string, appId: string | null, method: string, ip: string | null, ua: string | null) {
+  await evictUnverifiedControllers(walletId, { appId: null, userId: null }, ip, method);
   await revokeAllSessions(walletId);
   const { data: w } = await db
     .from("wallets")
-    .update({ verified: true, verified_method: method, updated_at: new Date().toISOString() })
+    .update({ verified: true, verified_method: method, email_verified_at: new Date().toISOString(), updated_at: new Date().toISOString() })
     .eq("id", walletId)
     .select("*")
     .single();
@@ -191,7 +289,7 @@ export async function takeover(walletId: string, appId: string | null, method: s
 }
 
 async function walletByEmail(email: string) {
-  const { data } = await db.from("wallets").select("*").eq("email", email.trim().toLowerCase()).maybeSingle();
+  const { data } = await db.from("wallets").select("*").eq("email", normalizeEmail(email)).is("retired_at", null).limit(1).maybeSingle();
   if (!data) throw new ApiError(404, "wallet_not_found");
   return data;
 }
@@ -202,19 +300,13 @@ export async function verifyOtp(app: App, email: string, code: string, ip: strin
     .from("wallet_verifications")
     .select("*")
     .eq("wallet_id", w.id)
+    .eq("purpose", "takeover")
     .is("consumed_at", null)
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
   if (!v) throw new ApiError(400, "no_pending_code");
-  const state = checkOtpUsable(v);
-  if (state !== "ok") throw new ApiError(400, state);
-  if ((await sha256Hex(w.id + ":" + code)) !== v.code_hash) {
-    await db.from("wallet_verifications").update({ attempts: v.attempts + 1 }).eq("id", v.id);
-    await audit({ wallet_id: w.id, app_id: app.id, action: "otp_failed", ip });
-    throw new ApiError(400, "invalid_code", "Incorrect code", { attempts_left: Math.max(0, 4 - v.attempts) });
-  }
-  await db.from("wallet_verifications").update({ consumed_at: new Date().toISOString() }).eq("id", v.id);
+  await spendAttemptAndCheck(v as Verification, code, w, app.id, ip, "takeover");
   return takeover(w.id, app.id, "email_otp", ip, ua);
 }
 
@@ -245,7 +337,7 @@ export async function walletFromSession(token: string | null) {
 
 export async function signWithWallet(walletId: string, appId: string | null, typed: unknown, ip: string | null) {
   const { data: w } = await db.from("wallets").select("*").eq("id", walletId).single();
-  const pk = await decryptSecret(w!.encrypted_private_key, encKey());
+  const pk = await openKey(w!.encrypted_private_key);
   const result = signTypedMessage(pk, w!.address, typed as never);
   await audit({ wallet_id: walletId, app_id: appId, action: "signed_typed_data", ip, details: { message_hash: result.message_hash } });
   return { address: w!.address, ...result };
@@ -293,13 +385,21 @@ export async function getAssets(address: string) {
 // ---------- portal (signed-in owner) ----------
 export class VerifyRequired extends Error { constructor(public walletId: string) { super("verify_required"); } }
 
+/** Wallet nobody owns yet that carries this email (live or retired). Plain equality filters, never string-built. */
+async function findUnownedByEmail(email: string) {
+  for (const col of ["email", "retired_email"] as const) {
+    const { data } = await db.from("wallets").select("id,imported_from,email_verified_at").is("user_id", null).is("retired_at", null).eq(col, email).limit(1).maybeSingle();
+    if (data) return data;
+  }
+  return null;
+}
+
 /** Returns the signed-in owner's wallet. Throws VerifyRequired when the email already has a wallet the
  *  person doesn't own yet and they didn't sign in with Google — they must enter an emailed code first. */
 export async function ensureOwnerWallet(userId: string, email: string, method: string, ip: string | null) {
-  const lower = email.toLowerCase();
+  const lower = normalizeEmail(email);
   const google = method === "google";
-  const { data: unowned } = await db.from("wallets").select("id,imported_from,email_verified_at").is("user_id", null).is("retired_at", null)
-    .or(`email.eq.${lower},retired_email.eq.${lower}`).limit(1).maybeSingle();
+  const unowned = await findUnownedByEmail(lower);
   if (unowned && !(unowned.imported_from && !unowned.email_verified_at)) {
     if (needsEmailProof({ walletExists: true, alreadyLinked: false, method: google ? "google" : "password", appTrustedGoogle: false, isHubGoogle: google })) throw new VerifyRequired(unowned.id);
     try { return await claimImportedWallet(userId, lower, unowned.id, method, null, true); }
@@ -307,7 +407,8 @@ export async function ensureOwnerWallet(userId: string, email: string, method: s
   }
   const { data: linked } = await db.from("wallets").select("*").eq("user_id", userId).maybeSingle();
   if (linked) return linked;
-  const w = await insertWallet(lower, { user_id: userId, verified: true, method });
+  // Google vouches for the address. A password sign-up is not proof until the person later enters an emailed code.
+  const w = await insertWallet(lower, { user_id: userId, verified: true, emailProven: google, method });
   await audit({ wallet_id: w.id, action: "wallet_created", method, ip });
   return w;
 }
@@ -317,7 +418,7 @@ export async function startEmailProof(walletId: string, p: { purpose: "portal_cl
   const { data: w } = await db.from("wallets").select("id,email,retired_email").eq("id", walletId).single();
   const to = w?.email ?? w?.retired_email;
   if (!to) throw new ApiError(400, "wallet_has_no_email");
-  await rateLimit(`proof:${to}`, 5, 10 * 60_000);
+  await guardCodeSend(to, ip);
   const { data: last } = await db.from("wallet_verifications").select("last_sent_at").eq("wallet_id", walletId).eq("purpose", p.purpose).is("consumed_at", null).order("created_at", { ascending: false }).limit(1).maybeSingle();
   if (last) { const wait = resendWaitSeconds(last); if (wait > 0) throw new ApiError(429, "resend_cooldown", `Wait ${wait}s`, { retry_after: wait }); }
   await db.from("wallet_verifications").update({ consumed_at: new Date().toISOString() }).eq("wallet_id", walletId).eq("purpose", p.purpose).is("consumed_at", null);
@@ -340,15 +441,8 @@ export async function checkEmailProof(where: { id?: string; walletId?: string; p
   if (where.appId) q = q.eq("app_id", where.appId);
   const { data: v } = await q.order("created_at", { ascending: false }).limit(1).maybeSingle();
   if (!v) throw new ApiError(400, "no_pending_code");
-  const state = checkOtpUsable(v);
-  if (state !== "ok") throw new ApiError(400, state);
-  if ((await sha256Hex(v.wallet_id + ":" + code.trim())) !== v.code_hash) {
-    await db.from("wallet_verifications").update({ attempts: v.attempts + 1 }).eq("id", v.id);
-    await audit({ wallet_id: v.wallet_id, app_id: v.app_id, action: "otp_failed", ip, details: { purpose: where.purpose } });
-    throw new ApiError(400, "invalid_code", "Incorrect code", { attempts_left: Math.max(0, 4 - v.attempts) });
-  }
-  await db.from("wallet_verifications").update({ consumed_at: new Date().toISOString() }).eq("id", v.id);
-  return v;
+  await spendAttemptAndCheck(v as Verification, code, { id: v.wallet_id }, v.app_id, ip, where.purpose);
+  return v as Verification;
 }
 
 // ---------- popup (code + PKCE) ----------
@@ -387,7 +481,7 @@ export async function requireConnection(walletId: string, app: App, origin: stri
 export async function executeForWallet(walletId: string, appId: string | null, calls: import("./paymaster").Call[], ip: string | null) {
   await rateLimit(`exec:${walletId}`, 10, 60_000);
   const { data: w } = await db.from("wallets").select("*").eq("id", walletId).single();
-  const pk = await decryptSecret(w!.encrypted_private_key, encKey());
+  const pk = await openKey(w!.encrypted_private_key);
   const { executeSponsored } = await import("./paymaster.server");
   try {
     const r = await executeSponsored({ address: w!.address, publicKey: w!.public_key, privateKey: pk, deployed: w!.deployed, calls });
@@ -410,42 +504,28 @@ async function holdingsOf(w: { id: string; address: string }) {
   return { tokens: tok.count ?? 0, nfts: nft.count ?? 0, strkRaw: assets ? BigInt(String(assets.balances[0]?.raw ?? "0")) : 1n };
 }
 
-/** Loop Do sends {user_id,address,email,email_verified}; we attach the email to the matching imported wallet. */
-export async function attachLoopDoEmails(rows: { user_id: string; address: string; email: string; email_verified: boolean }[], dryRun: boolean) {
-  const { data: app } = await db.from("registered_apps").select("id").eq("name", "Loop Do").is("revoked_at", null).maybeSingle();
-  if (!app) throw new ApiError(400, "loop_do_app_missing");
-  const { data: found } = await db.from("wallets").select("id,external_id,address,user_id,email").eq("app_id", app.id).in("external_id", rows.map((r) => r.user_id));
-  const byExt = new Map((found ?? []).map((w) => [w.external_id, w]));
-  const results: { user_id: string; status: string }[] = [];
-  for (const r of rows) {
-    const w = byExt.get(r.user_id) ?? null;
-    const check = canAttachEmail(w, r);
-    if (check !== "ok") { results.push({ user_id: r.user_id, status: check }); continue; }
-    const email = r.email.trim().toLowerCase();
-    if (w!.email === email) { results.push({ user_id: r.user_id, status: "exists" }); continue; }
-    if (dryRun) { results.push({ user_id: r.user_id, status: "would_link" }); continue; }
-    // If a hub-made wallet already owns this email, keep the email on it until the owner signs in (handled at sign-in).
-    const { data: clash } = await db.from("wallets").select("id").eq("email", email).maybeSingle();
-    const { error } = await db.from("wallets").update(clash ? { retired_email: email, email_verified_at: new Date().toISOString() } : { email, email_verified_at: new Date().toISOString() }).eq("id", w!.id);
-    results.push({ user_id: r.user_id, status: error ? "error" : clash ? "pending_owner_sign_in" : "linked" });
-    if (!error) await audit({ wallet_id: w!.id, action: "loop_do_email_linked", details: { pending: !!clash } });
-  }
-  return results;
-}
-
 /** Move a user onto an unclaimed imported wallet; retire their hub-made wallet only if empty. */
 export async function claimImportedWallet(userId: string, email: string, importedId: string, method: string, actor: string | null, anyWallet = false) {
   const { data: imp } = await db.from("wallets").select("*").eq("id", importedId).maybeSingle();
   if (!imp || (!anyWallet && !imp.imported_from?.startsWith("loop-do"))) throw new ApiError(400, "not_an_imported_wallet");
   if (imp.user_id && imp.user_id !== userId) throw new ApiError(409, "already_claimed");
-  const { data: current } = await db.from("wallets").select("*").or(`user_id.eq.${userId},email.eq.${email}`);
-  for (const c of (current ?? []).filter((c) => c.id !== imp.id)) {
+  const seen = new Map<string, NonNullable<typeof imp>>();
+  for (const q of [db.from("wallets").select("*").eq("user_id", userId), db.from("wallets").select("*").eq("email", email)]) {
+    const { data } = await q;
+    for (const c of data ?? []) seen.set(c.id, c);
+  }
+  for (const c of [...seen.values()].filter((c) => c.id !== imp.id)) {
     if (!canRetireWallet(c, await holdingsOf(c))) throw new ApiError(409, "hub_wallet_not_empty", "The hub-made wallet holds something; an admin must decide.");
     await revokeAllSessions(c.id);
     await db.from("wallets").update({ user_id: null, email: null, retired_email: c.email, retired_at: new Date().toISOString() }).eq("id", c.id);
     await audit({ wallet_id: c.id, action: "wallet_retired", method, details: { replaced_by: imp.id, actor } });
   }
-  const { data } = await db.from("wallets").update({ user_id: userId, email, retired_email: null, verified: true, verified_method: method, updated_at: new Date().toISOString() }).eq("id", imp.id).select("*").single();
+  const proven = isProofMethod(method);
+  if (proven) await evictUnverifiedControllers(imp.id, { userId }, null, method);
+  const { data } = await db.from("wallets").update({
+    user_id: userId, email, retired_email: null, verified: true, verified_method: method, updated_at: new Date().toISOString(),
+    ...(proven ? { email_verified_at: new Date().toISOString() } : {}),
+  }).eq("id", imp.id).select("*").single();
   await audit({ wallet_id: imp.id, action: "loop_do_wallet_claimed", method, details: { actor } });
   return data!;
 }

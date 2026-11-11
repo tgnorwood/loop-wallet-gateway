@@ -26,8 +26,8 @@ export const chainDashboard = createServerFn({ method: "POST" })
       txq, tokq, colq,
       sb.from("nfts").select("id", { count: "exact", head: true }),
       sb.from("wallets").select("id", { count: "exact", head: true }),
-      sb.from("transactions").select("id", { count: "exact", head: true }).in("status", ["queued", "processing", "submitted"]),
-      sb.from("transactions").select("id", { count: "exact", head: true }).like("signer_key", "operator:%").in("status", ["queued", "processing", "submitted"]),
+      sb.from("transactions").select("id", { count: "exact", head: true }).in("status", ["queued", "processing", "submitted", "finalizing"]),
+      sb.from("transactions").select("id", { count: "exact", head: true }).like("signer_key", "operator:%").in("status", ["queued", "processing", "submitted", "finalizing"]),
       sb.from("transactions").select("id", { count: "exact", head: true }).eq("status", "confirmed").gte("created_at", day),
       sb.from("transactions").select("id", { count: "exact", head: true }).eq("status", "failed").gte("created_at", day),
       sb.from("registered_apps").select("id,name,webhook_url,daily_mint_cap,daily_distribute_cap,rate_limit_per_min,mainnet_enabled,api_enabled").is("revoked_at", null).order("name"),
@@ -47,7 +47,7 @@ export const chainDashboard = createServerFn({ method: "POST" })
         loopDoImported: ldAll.count ?? 0, loopDoLegacy: ldLegacy.count ?? 0, loopDoLastAt: ldLast.data?.created_at ?? null,
       },
       transactions: txs.data ?? [], tokens: tokens.data ?? [], collections: cols.data ?? [], apps: apps.data ?? [],
-      relayConfigured: !!process.env["RELAY_API_KEY"], loopDoSecretConfigured: !!process.env["LOOPDO_WALLET_DERIVATION_SECRET"],
+      relayConfigured: !!process.env["RELAY_API_KEY"],
     };
   });
 
@@ -92,7 +92,7 @@ export const adminMarkTest = createServerFn({ method: "POST" })
 
 const importInput = z.object({
   appId: z.string().uuid(),
-  mode: z.enum(["loop-do-wallets", "new-wallets", "tokens"]),
+  mode: z.enum(["new-wallets", "tokens"]),
   csv: z.string().max(2_000_000),
   dryRun: z.boolean(),
 });
@@ -118,8 +118,8 @@ export const adminImport = createServerFn({ method: "POST" })
       return { rows: res.map((r) => ({ externalId: r.address, status: r.status })) };
     }
     const res = await mig.importWallets({
-      appId: data.appId, source: data.mode === "loop-do-wallets" ? "loop-do" : "new", dryRun: data.dryRun, actor: context.userId,
-      rows: rows.map((r) => ({ externalId: r["user_id"] || r["external_id"] || r["externalid"] || r["email"] || "", email: r["email"], salt: r["salt"], privateKey: r["private_key"] || undefined, address: r["address"], kind: r["kind"] || undefined })).filter((r) => r.externalId),
+      appId: data.appId, dryRun: data.dryRun, actor: context.userId,
+      rows: rows.map((r) => ({ externalId: r["external_id"] || r["externalid"] || r["email"] || "", email: r["email"], kind: r["kind"] || undefined })).filter((r) => r.externalId),
     });
     return { rows: res };
   });
@@ -177,4 +177,35 @@ export const adminLinkImportedWallet = createServerFn({ method: "POST" })
       const w = await claimImportedWallet(user.id, email, imp.id, "admin_link", context.userId);
       return { ok: true as const, preview: false, loopDoUserId: imp.external_id, address: w.address };
     } catch (e) { return { ok: false as const, error: (e as Error).message }; }
+  });
+
+// ---------- operations: stuck transactions, encryption key ----------
+export const adminResolveTransaction = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: { id: string; action: "attach_hash" | "mark_failed" | "requeue"; txHash?: string; note?: string }) =>
+    z.object({ id: z.string().uuid(), action: z.enum(["attach_hash", "mark_failed", "requeue"]), txHash: z.string().max(80).optional(), note: z.string().max(300).optional() }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.supabase, context.userId);
+    const { resolveTransaction } = await import("./engine.server");
+    try {
+      const tx = await resolveTransaction(data.id, data.action, { ...(data.txHash ? { txHash: data.txHash } : {}), ...(data.note ? { note: data.note } : {}) }, context.userId);
+      return { ok: true as const, status: tx.status };
+    } catch (e) { return { ok: false as const, error: (e as Error).message }; }
+  });
+
+export const adminKeyStatus = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await assertAdmin(context.supabase, context.userId);
+    const { keyStatus } = await import("./key-rotation.server");
+    try { return { ok: true as const, ...(await keyStatus()) }; } catch (e) { return { ok: false as const, error: (e as Error).message }; }
+  });
+
+export const adminRotateKeys = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: { dryRun: boolean }) => z.object({ dryRun: z.boolean() }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.supabase, context.userId);
+    const { rotateWalletKeys } = await import("./key-rotation.server");
+    try { return { ok: true as const, ...(await rotateWalletKeys(200, data.dryRun, context.userId)) }; } catch (e) { return { ok: false as const, error: (e as Error).message }; }
   });

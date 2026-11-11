@@ -17,6 +17,15 @@ async function ownerWallet(claims: Record<string, unknown>, userId: string) {
   return { svc, wallet: await svc.ensureOwnerWallet(userId, email, meta.provider === "google" ? "google" : "password", ip()) };
 }
 
+/** Like ownerWallet, but reports "email must be verified first" as a result the popup can act on. */
+async function ownerOrVerify(claims: Record<string, unknown>, userId: string) {
+  try { return { verify: false as const, ...(await ownerWallet(claims, userId)) }; }
+  catch (e) {
+    if ((e as Error).message === "verify_required") return { verify: true as const, email: String(claims["email"] ?? "") };
+    throw e;
+  }
+}
+
 async function assertAdmin(supabase: { rpc: (...a: never[]) => unknown }, userId: string) {
   const { data } = (await (supabase.rpc as (n: string, a: object) => Promise<{ data: boolean }>)("has_role", {
     _user_id: userId,
@@ -90,10 +99,12 @@ export const approveConnect = createServerFn({ method: "POST" })
     z.object({ appId: z.string().uuid(), origin: z.string().url().max(300), challenge: z.string().min(43).max(128) }).parse(d),
   )
   .handler(async ({ data, context }) => {
-    const { svc, wallet } = await ownerWallet(context.claims as never, context.userId);
+    const o = await ownerOrVerify(context.claims as never, context.userId);
+    if (o.verify) return { needsVerification: true as const, email: o.email };
+    const { svc, wallet } = o;
     const app = await svc.appById(data.appId);
     const code = await svc.createAuthCode(wallet.id, app, data.origin, data.challenge);
-    return { code, address: wallet.address };
+    return { needsVerification: false as const, code, address: wallet.address };
   });
 
 export const approveSign = createServerFn({ method: "POST" })
@@ -102,10 +113,12 @@ export const approveSign = createServerFn({ method: "POST" })
     z.object({ appId: z.string().uuid(), origin: z.string().url().max(300), typedData: z.any() }).parse(d),
   )
   .handler(async ({ data, context }) => {
-    const { svc, wallet } = await ownerWallet(context.claims as never, context.userId);
+    const o = await ownerOrVerify(context.claims as never, context.userId);
+    if (o.verify) return { needsVerification: true as const, email: o.email };
+    const { svc, wallet } = o;
     const app = await svc.appById(data.appId);
     await svc.requireConnection(wallet.id, app, data.origin);
-    return svc.signWithWallet(wallet.id, app.id, data.typedData, ip());
+    return { needsVerification: false as const, ...(await svc.signWithWallet(wallet.id, app.id, data.typedData, ip())) };
   });
 
 export const approveExecute = createServerFn({ method: "POST" })
@@ -114,11 +127,13 @@ export const approveExecute = createServerFn({ method: "POST" })
     z.object({ appId: z.string().uuid(), origin: z.string().url().max(300), calls: callsSchema }).parse(d),
   )
   .handler(async ({ data, context }) => {
-    const { svc, wallet } = await ownerWallet(context.claims as never, context.userId);
+    const o = await ownerOrVerify(context.claims as never, context.userId);
+    if (o.verify) return { needsVerification: true as const, email: o.email };
+    const { svc, wallet } = o;
     const app = await svc.appById(data.appId);
     await svc.requireConnection(wallet.id, app, data.origin);
     try {
-      return await svc.executeForWallet(wallet.id, app.id, data.calls, ip());
+      return { needsVerification: false as const, ...(await svc.executeForWallet(wallet.id, app.id, data.calls, ip())) };
     } catch (e) {
       throw new Error(e instanceof svc.ApiError ? "Gas sponsorship failed, nothing was spent. Try again later." : (e as Error).message);
     }
@@ -202,7 +217,8 @@ export const adminSearch = createServerFn({ method: "POST" })
     await assertAdmin(context.supabase as never, context.userId);
     const sb = context.supabase;
     const q = data.q.toLowerCase();
-    const { data: w } = await sb.from("wallets").select("id,email,address,verified,verified_method,deployed,class_hash,created_at").or(q.startsWith("0x") ? `address.eq.${q}` : `email.eq.${q}`).maybeSingle();
+    const cols = "id,email,address,verified,verified_method,deployed,class_hash,created_at";
+    const { data: w } = await (q.startsWith("0x") ? sb.from("wallets").select(cols).eq("address", q) : sb.from("wallets").select(cols).eq("email", q)).limit(1).maybeSingle();
     if (!w) return null;
     const [logs, sessions] = await Promise.all([
       sb.from("audit_logs").select("id,action,method,ip,created_at,details,registered_apps(name)").eq("wallet_id", w.id).order("created_at", { ascending: false }).limit(100),

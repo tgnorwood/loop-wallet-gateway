@@ -6,6 +6,7 @@ import { SignInCard } from "@/components/SignInCard";
 import { useAuth } from "@/hooks/use-auth";
 import { approveExecute, approveSign } from "@/lib/wallet/portal.functions";
 import { Shell, reply, usePartnerApp } from "@/components/connect-shared";
+import { VerifyEmail } from "@/components/VerifyEmail";
 
 export const Route = createFileRoute("/connect/sign")({
   head: () => ({
@@ -29,6 +30,7 @@ function SignPopup() {
   const [calls, setCalls] = useState<unknown[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [verifyEmail, setVerifyEmail] = useState<string | null>(null);
 
   // Partner sends the typed data via postMessage after the popup announces it is ready.
   useEffect(() => {
@@ -48,6 +50,8 @@ function SignPopup() {
   if (app === undefined || loading) return <Shell><p className="text-muted-foreground">Loading…</p></Shell>;
   if (!app) return <Shell><p className="text-destructive">Unknown app.</p></Shell>;
   if (!user) return <Shell><SignInCard title={`Sign in to approve for ${app.name}`} /></Shell>;
+
+  if (verifyEmail) return <Shell><VerifyEmail embedded email={verifyEmail} onVerified={() => setVerifyEmail(null)} /></Shell>;
 
   return (
     <Shell>
@@ -69,10 +73,14 @@ function SignPopup() {
               try {
                 if (calls) {
                   const r = await exec({ data: { appId, origin, calls: calls as never } });
-                  reply(origin, { type: "transaction", ...r });
+                  if (r.needsVerification) { setVerifyEmail(r.email); return; }
+                  const { needsVerification: _nv, ...tx } = r;
+                  reply(origin, { type: "transaction", ...tx });
                 } else {
                   const r = await sign({ data: { appId, origin, typedData: typed } });
-                  reply(origin, { type: "signature", ...r });
+                  if (r.needsVerification) { setVerifyEmail(r.email); return; }
+                  const { needsVerification: _nv, ...sig } = r;
+                  reply(origin, { type: "signature", ...sig });
                 }
                 window.close();
               } catch (e) {

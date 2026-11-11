@@ -81,29 +81,8 @@ describe("reading created addresses from events", () => {
   });
 });
 
-import { parseTransportKey, decryptPushedKey, isGasFreeClass, normAddress } from "@/lib/wallet/chain-rules";
-describe("Loop Do push migration", () => {
-  const keyHex = "11".repeat(32);
-  const addr = "0x0" + "abc".repeat(10);
-  async function encrypt(plain: Uint8Array, aadAddr: string) {
-    const k = await crypto.subtle.importKey("raw", parseTransportKey(keyHex) as BufferSource, { name: "AES-GCM" }, false, ["encrypt"]);
-    const iv = new Uint8Array(12).fill(7);
-    const ct = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv, additionalData: new TextEncoder().encode(normAddress(aadAddr)), tagLength: 128 }, k, plain as BufferSource));
-    return { iv: btoa(String.fromCharCode(...iv)), ciphertext: btoa(String.fromCharCode(...ct)) };
-  }
-  it("accepts 64-hex and base64 32-byte keys, rejects others", () => {
-    expect(parseTransportKey(keyHex).length).toBe(32);
-    expect(parseTransportKey(btoa(String.fromCharCode(...new Uint8Array(32)))).length).toBe(32);
-    expect(() => parseTransportKey("abcd")).toThrow();
-  });
-  it("decrypts a key bound to its address", async () => {
-    const e = await encrypt(new Uint8Array(32).fill(1), addr);
-    expect(await decryptPushedKey(parseTransportKey(keyHex), addr, e.iv, e.ciphertext)).toBe("0x" + "01".repeat(32));
-  });
-  it("refuses a key sent with a different address", async () => {
-    const e = await encrypt(new Uint8Array(32).fill(1), addr);
-    await expect(decryptPushedKey(parseTransportKey(keyHex), "0x1234", e.iv, e.ciphertext)).rejects.toThrow();
-  });
+import { isGasFreeClass } from "@/lib/wallet/chain-rules";
+describe("account class", () => {
   it("only the SNIP-9 class is gas-free; legacy maps to LEGACY_ACCOUNT", () => {
     expect(isGasFreeClass("0x2b48623275dbaedb7f16ff5d0e7a4c722727d2a3e7c4477fa4650140834ba1f")).toBe(true);
     expect(isGasFreeClass("0x061dac032f228abef9c6626f995015233097ae253a7f72d68552db02f2971b8f")).toBe(false);

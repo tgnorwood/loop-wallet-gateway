@@ -28,18 +28,21 @@ const popup = `<script src="HUB_URL/sdk/loop-wallet.js"></script>
   };
 </script>`;
 
-const api = `POST /api/public/v1/wallet/get-or-create   { email }
-POST /api/public/v1/wallet/verify-otp      { email, code }
-POST /api/public/v1/wallet/resend-otp      { email }
+const api = `Popup sign-in ("Log in with Loop Wallet") - used by the SDK, unchanged:
 GET  /api/public/v1/wallet/:address/assets
-POST /api/public/v1/wallet/sign            { session_token, typed_data }
-POST /api/public/v1/wallet/execute         { session_token, calls: [{ contractAddress, entrypoint, calldata }] }
-Header on every call: X-App-Key: lwk_...`;
+POST /api/public/v1/wallet/sign         { session_token, typed_data }
+POST /api/public/v1/wallet/execute      { session_token, calls: [{ contractAddress, entrypoint, calldata }] }
+POST /api/public/v1/oauth/token         { code, code_verifier }
+Header: X-App-Key: lwk_...
+
+RETIRED (answer 410): /wallet/get-or-create, /wallet/verify-otp, /wallet/resend-otp
+Use POST /api/public/v1/wallets and POST /api/public/v1/wallets/verify instead.`;
 
 const v1 = `Base: /api/public/v1   Headers: Authorization: Bearer lwk_...   Idempotency-Key: <uuid> (all writes)
 Amounts are decimal strings ("12.5"). Errors: { error: { code, message, details } }
 
-POST /wallets                 { externalId, kind?: user|collection_owner|treasury, label?, email?, signInMethod?: google|password|other }
+POST /wallets                 { externalId, kind?: user|collection_owner|treasury, label?, email?, emailVerified?, signInMethod?: google|password|other }
+                              emailVerified only counts for apps the admin marked trusted; otherwise the email is stored unverified
                               201 new · 200 existing/linked · 202 { verificationId } = email already has a wallet; a code was emailed
 POST /wallets/verify          { verificationId, code }  -> 200 wallet linked to your externalId (Google skips the code only for apps trusted for Google sign-in)
 GET  /wallets?externalId=…  · /wallets/:id · /wallets/:id/balances · /wallets/:id/nfts

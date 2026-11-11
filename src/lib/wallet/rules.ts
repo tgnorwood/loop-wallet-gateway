@@ -59,3 +59,44 @@ export function needsEmailProof(p: { walletExists: boolean; alreadyLinked: boole
   if (p.method === "google" && (p.isHubGoogle || p.appTrustedGoogle)) return false;
   return true;
 }
+
+export const normalizeEmail = (e: string) => e.trim().toLowerCase();
+
+/** An app's "this email is verified" claim is only believed when the admin flagged the app as trusted. */
+export function emailVerifiedEffective(claimed: boolean | undefined, appTrusted: boolean) {
+  return claimed === true && appTrusted;
+}
+
+/**
+ * When someone proves they own an email (emailed code, Google), the wallet's previous controllers are
+ * removed - but only when that email was never proven before. Imported Loop Do wallets keep their home app.
+ */
+export function shouldEvictControllers(w: { email_verified_at: string | null; imported_from: string | null }) {
+  return !w.email_verified_at && !w.imported_from;
+}
+
+/** Sign-in methods that count as proof of owning the email when claiming a wallet. */
+export const PROOF_METHODS = ["google", "email_code", "email_otp", "oauth"] as const;
+export const isProofMethod = (m: string) => (PROOF_METHODS as readonly string[]).includes(m);
+
+/** Spread new operator work over `lanes` parallel signers: pick the least-loaded one. */
+export function pickLane(loadByLane: number[]) {
+  let best = 0;
+  for (let i = 1; i < loadByLane.length; i++) if ((loadByLane[i] ?? 0) < (loadByLane[best] ?? 0)) best = i;
+  return best;
+}
+export const laneKey = (network: string, lane: number) => `operator:${network}:${lane}`;
+export const isOperatorKey = (k: string) => k.startsWith("operator:");
+export function laneOf(signerKey: string, network: string) {
+  const m = new RegExp(`^operator:${network}:(\\d+)$`).exec(signerKey);
+  return m ? Number(m[1]) : null;
+}
+
+/** One app must not be able to fill the whole queue and starve the others. */
+export function queueFull(queuedForApp: number, cap: number) {
+  return queuedForApp >= cap;
+}
+/** Rough time until a queue of this depth drains, for the Retry-After header. */
+export function retryAfterForQueue(queued: number, lanes: number, secondsPerTx = 14) {
+  return Math.min(300, Math.max(5, Math.ceil((queued / Math.max(1, lanes)) * secondsPerTx)));
+}

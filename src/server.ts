@@ -47,12 +47,27 @@ function isH3SwallowedErrorBody(body: string): boolean {
 // Hosting compresses every response at the edge. Never compress a body (gzip, brotli,
 // CompressionStream) or set content-encoding here or in a server route: the body gets encoded
 // twice and renders garbled.
+// Pages may only be embedded by this site and by Lovable's own editor/preview, so another site can't frame
+// the sign-in or approval screens and trick someone into clicking. (A full script-src CSP is deliberately not
+// set here: it needs testing against the live pages first, or it can break sign-in.)
+const FRAME_ANCESTORS = "frame-ancestors 'self' https://*.lovable.dev https://*.lovable.app https://*.lovableproject.com";
+
+function withSecurityHeaders(response: Response): Response {
+  const type = response.headers.get("content-type") ?? "";
+  const headers = new Headers(response.headers);
+  headers.set("X-Content-Type-Options", "nosniff");
+  headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
+  headers.set("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  if (type.includes("text/html")) headers.set("Content-Security-Policy", FRAME_ANCESTORS);
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+}
+
 export default {
   async fetch(request: Request, env: unknown, ctx: unknown) {
     try {
       const handler = await getServerEntry();
       const response = await handler.fetch(request, env, ctx);
-      return await normalizeCatastrophicSsrResponse(response);
+      return withSecurityHeaders(await normalizeCatastrophicSsrResponse(response));
     } catch (error) {
       console.error(error);
       return new Response(renderErrorPage(), {

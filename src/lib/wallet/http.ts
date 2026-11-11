@@ -61,3 +61,14 @@ export function handle<T>(
 }
 
 export const emailSchema = z.string().trim().email().max(254);
+
+/**
+ * The email-only endpoints (/wallet/get-or-create, verify-otp, resend-otp) are retired in favour of
+ * POST /api/public/v1/wallets. They answer 410 and log which app called, unless LEGACY_WALLET_API=on.
+ */
+export async function legacyEndpointGate(app: { id: string } | null, endpoint: string, ip: string | null) {
+  if (process.env["LEGACY_WALLET_API"] === "on") return;
+  const svc = await import("./service.server");
+  await svc.audit({ app_id: app?.id ?? null, action: "legacy_endpoint_called", method: endpoint, ip });
+  throw new svc.ApiError(410, "endpoint_retired", "This endpoint is retired. Use POST /api/public/v1/wallets (then POST /api/public/v1/wallets/verify) with your app key in an Authorization: Bearer header from your server.");
+}

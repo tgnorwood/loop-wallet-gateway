@@ -12,7 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuth } from "@/hooks/use-auth";
 import { fromBaseUnits, publicTransactionStatus } from "@/lib/wallet/chain-rules";
-import { adminImport, adminLinkImportedWallet, adminMarkTest, adminResyncToken, adminTokenHistory, adminUpdateAppChain, chainDashboard } from "@/lib/wallet/chain-admin.functions";
+import { adminImport, adminKeyStatus, adminLinkImportedWallet, adminMarkTest, adminResolveTransaction, adminResyncToken, adminRotateKeys, adminTokenHistory, adminUpdateAppChain, chainDashboard } from "@/lib/wallet/chain-admin.functions";
 
 export const Route = createFileRoute("/dashboard")({
   head: () => ({
@@ -66,6 +66,11 @@ function Dashboard() {
 
   return (
     <main className="mx-auto max-w-6xl space-y-6 px-4 py-8">
+      {data.transactions.some((t) => publicTransactionStatus(t.status, t.error_code) === "unknown") && (
+        <div className="rounded-xl border border-destructive/40 bg-destructive/5 p-4 text-sm">
+          {data.transactions.filter((t) => publicTransactionStatus(t.status, t.error_code) === "unknown").length} transaction(s) have an unknown outcome and are holding up their queue. Open the Activity log and resolve them.
+        </div>
+      )}
       {!data.relayConfigured && (
         <div className="rounded-xl border border-destructive/40 bg-destructive/5 p-4 text-sm">
           The operator relay key is not set yet, so creating tokens, distributing, creating collections and minting will fail until it is added. Wallet transfers and edits work already.
@@ -101,9 +106,11 @@ function Dashboard() {
           <TabsTrigger value="apps">Apps</TabsTrigger>
           <TabsTrigger value="import">Move wallets in</TabsTrigger>
           <TabsTrigger value="users">Users</TabsTrigger>
+          <TabsTrigger value="security">Security</TabsTrigger>
         </TabsList>
 
         <TabsContent value="users" className="rounded-xl border bg-card p-4"><LinkWallet /></TabsContent>
+        <TabsContent value="security" className="rounded-xl border bg-card p-4"><KeyPanel /></TabsContent>
 
         <TabsContent value="log" className="rounded-xl border bg-card p-4">
           <div className="mb-3 flex gap-2 text-sm">
@@ -120,6 +127,7 @@ function Dashboard() {
               <span className="flex items-center gap-2">
                 <span className={t.status === "failed" ? "text-destructive" : t.status === "confirmed" ? "text-primary" : "text-muted-foreground"}>{publicTransactionStatus(t.status, t.error_code)}</span>
                 {t.tx_hash && <a className="underline" href={voyager("tx", t.tx_hash)} target="_blank" rel="noreferrer">view</a>}
+                {publicTransactionStatus(t.status, t.error_code) === "unknown" && <Resolve id={t.id} hasHash={!!t.tx_hash} />}
               </span>
             </div>
           ))}
@@ -154,7 +162,7 @@ function Dashboard() {
           {data.apps.length === 0 && <p className="text-sm text-muted-foreground">Create apps on the Admin page first.</p>}
         </TabsContent>
         <TabsContent value="import">
-          <Import apps={data.apps} loopDoReady={data.loopDoSecretConfigured} />
+          <Import apps={data.apps} />
         </TabsContent>
       </Tabs>
     </main>
@@ -286,15 +294,14 @@ function AppSettings({ app }: { app: AppRow }) {
   );
 }
 
-function Import({ apps, loopDoReady }: { apps: AppRow[]; loopDoReady: boolean }) {
+function Import({ apps }: { apps: AppRow[] }) {
   const run = useServerFn(adminImport);
   const [appId, setAppId] = useState(apps[0]?.id ?? "");
-  const [mode, setMode] = useState<"loop-do-wallets" | "new-wallets" | "tokens">("loop-do-wallets");
+  const [mode, setMode] = useState<"new-wallets" | "tokens">("new-wallets");
   const [csv, setCsv] = useState("");
   const [rows, setRows] = useState<{ externalId: string; status: string; address?: string; note?: string }[]>([]);
   const [busy, setBusy] = useState(false);
   const help = {
-    "loop-do-wallets": "Columns: user_id,address,private_key,email — exported from Loop Do. Each key is checked against its address before import, so balances stay. Delete the export file afterwards.",
     "new-wallets": "Columns: external_id,email,kind — e.g. Loop Fans fans. Each gets a new wallet.",
     tokens: "Columns: address,name,symbol,swappable — existing Loop Do tokens to manage from here.",
   }[mode];
@@ -311,13 +318,11 @@ function Import({ apps, loopDoReady }: { apps: AppRow[]; loopDoReady: boolean })
           {apps.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
         </select>
         <select className="h-9 rounded-md border bg-background px-2 text-sm" value={mode} onChange={(e) => setMode(e.target.value as typeof mode)}>
-          <option value="loop-do-wallets">Loop Do wallets</option>
           <option value="new-wallets">New wallets (Loop Fans etc.)</option>
           <option value="tokens">Existing tokens</option>
         </select>
       </div>
       <p className="text-sm text-muted-foreground">{help}</p>
-      {mode === "loop-do-wallets" && !loopDoReady && null}
       <Textarea rows={8} value={csv} onChange={(e) => setCsv(e.target.value)} placeholder="Paste CSV here, first line = column names" className="font-mono text-xs" />
       <div className="flex gap-2">
         <Button variant="outline" disabled={busy || !appId || !csv} onClick={() => go(true)}>Preview</Button>
@@ -368,6 +373,72 @@ function LinkWallet() {
       ) : (
         <Button disabled={busy || !email || !address} onClick={() => run(false)}>Check</Button>
       )}
+    </div>
+  );
+}
+
+function Resolve({ id, hasHash }: { id: string; hasHash: boolean }) {
+  const resolve = useServerFn(adminResolveTransaction);
+  const qc = useQueryClient();
+  async function go(action: "attach_hash" | "mark_failed" | "requeue") {
+    let txHash: string | undefined;
+    if (action === "attach_hash") {
+      txHash = window.prompt("Paste the transaction hash you found on Voyager (0x…):")?.trim();
+      if (!txHash) return;
+    } else if (action === "mark_failed") {
+      if (!window.confirm("Only do this if you checked the chain and the transaction did NOT happen. Mark it failed?")) return;
+    } else if (!window.confirm("Send it again? If the first attempt actually reached the chain this will do the action twice. Check Voyager first.")) return;
+    const r = await resolve({ data: { id, action, ...(txHash ? { txHash } : {}) } }).catch((e) => ({ ok: false as const, error: (e as Error).message }));
+    if (r.ok) { toast.success("Updated"); void qc.invalidateQueries({ queryKey: ["chain-dash"] }); } else toast.error(r.error);
+  }
+  return (
+    <span className="flex gap-1">
+      <Button size="sm" variant="outline" onClick={() => go("attach_hash")}>Found on chain</Button>
+      <Button size="sm" variant="outline" onClick={() => go("mark_failed")}>Didn't happen</Button>
+      {!hasHash && <Button size="sm" variant="outline" onClick={() => go("requeue")}>Send again</Button>}
+    </span>
+  );
+}
+
+function KeyPanel() {
+  const status = useServerFn(adminKeyStatus);
+  const rotate = useServerFn(adminRotateKeys);
+  const { data, refetch } = useQuery({ queryKey: ["key-status"], queryFn: () => status(), retry: false });
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+  async function run(dryRun: boolean) {
+    setBusy(true);
+    try {
+      const r = await rotate({ data: { dryRun } });
+      if (!r.ok) { toast.error(r.error); return; }
+      setNote(`${dryRun ? "Checked" : "Re-encrypted"} ${r.rotated} wallet(s)${r.failed ? `, ${r.failed} failed: ${r.errors.join(" | ")}` : ""}. ${r.remaining} left.`);
+      void refetch();
+    } catch (e) { toast.error((e as Error).message); } finally { setBusy(false); }
+  }
+  if (!data) return <p className="text-sm text-muted-foreground">Loading…</p>;
+  if (!data.ok) return <p className="text-sm text-destructive">{data.error}</p>;
+  return (
+    <div className="max-w-2xl space-y-3 text-sm">
+      <h3 className="font-semibold">Wallet encryption key</h3>
+      <p className="text-muted-foreground">Every wallet's private key is encrypted with one key. Losing that key loses all funds, so it must be stored somewhere you control (a password manager) and not only in the app's secrets, which cannot be read back.</p>
+      <div className="grid grid-cols-2 gap-2 rounded-lg border p-3">
+        <span>Key in use</span><span className="font-mono">{data.currentKeyId}</span>
+        <span>New key (WALLET_ENCRYPTION_KEY_NEXT)</span><span className="font-mono">{data.nextKeyId ?? "not set"}</span>
+        <span>Wallets</span><span>{data.wallets}</span>
+        <span>Encrypted with the target key</span><span>{data.onTargetKey} of {data.wallets}</span>
+      </div>
+      {data.nextConfigured ? (
+        <div className="space-y-2">
+          <div className="flex gap-2">
+            <Button variant="outline" disabled={busy} onClick={() => run(true)}>Check (no changes)</Button>
+            <Button disabled={busy || data.remaining === 0} onClick={() => run(false)}>{data.remaining === 0 ? "All wallets on the new key" : "Re-encrypt next 200"}</Button>
+          </div>
+          {data.remaining === 0 && <p className="text-muted-foreground">Done. Now set WALLET_ENCRYPTION_KEY to the new key's value and delete WALLET_ENCRYPTION_KEY_NEXT.</p>}
+        </div>
+      ) : (
+        <p className="text-muted-foreground">To move onto a key you hold: generate a 64-character random key, store it in your password manager, then add it as the secret WALLET_ENCRYPTION_KEY_NEXT and reload this page.</p>
+      )}
+      {note && <p>{note}</p>}
     </div>
   );
 }

@@ -14,7 +14,8 @@ let rpcId = 0;
 async function pm(method: string, params: Record<string, unknown>) {
   const res = await fetch(paymasterUrl(), {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    // The proxy requires this key once it is locked (mainnet always). Same secret core.ts already sends.
+    headers: { "Content-Type": "application/json", ...(process.env["PAYMASTER_API_KEY"] ? { "x-paymaster-api-key": process.env["PAYMASTER_API_KEY"] } : {}) },
     body: JSON.stringify({ jsonrpc: "2.0", id: ++rpcId, method, params: [params] }),
   });
   const text = await res.text();
