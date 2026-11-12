@@ -54,3 +54,42 @@ export async function importTokens(p: { appId: string; rows: { address: string; 
   }
   return res;
 }
+
+/**
+ * Moved-in Loop Do wallets were all created here on the day they were imported. This applies each person's
+ * ORIGINAL sign-up date (exported from Loop Do) so charts show real growth. Only imported Loop Do wallets are touched.
+ */
+export async function setCreationDates(p: { appId: string; rows: { externalId: string; createdAt: string }[]; dryRun: boolean; actor: string }) {
+  const out: { externalId: string; status: string; address?: string; note?: string }[] = [];
+  const floor = Date.parse("2020-01-01");
+  const good: { externalId: string; iso: string }[] = [];
+  for (const r of p.rows) {
+    const t = Date.parse(r.createdAt);
+    if (!Number.isFinite(t) || t < floor || t > Date.now() + 864e5) { out.push({ externalId: r.externalId, status: "bad_date", note: r.createdAt.slice(0, 40) }); continue; }
+    good.push({ externalId: r.externalId, iso: new Date(t).toISOString() });
+  }
+  const found = new Map<string, { id: string; address: string; created_at: string; imported_from: string | null }>();
+  for (let i = 0; i < good.length; i += 200) {
+    const { data } = await db.from("wallets").select("id,external_id,address,created_at,imported_from").eq("app_id", p.appId).eq("network", "sepolia").in("external_id", good.slice(i, i + 200).map((g) => g.externalId));
+    for (const w of data ?? []) if (w.external_id) found.set(w.external_id, w);
+  }
+  const todo: { id: string; iso: string; externalId: string; address: string }[] = [];
+  for (const g of good) {
+    const w = found.get(g.externalId);
+    if (!w) { out.push({ externalId: g.externalId, status: "not_found" }); continue; }
+    if (!w.imported_from?.startsWith("loop-do")) { out.push({ externalId: g.externalId, status: "skipped", address: w.address, note: "not a moved-in Loop Do wallet" }); continue; }
+    if (Math.abs(Date.parse(w.created_at) - Date.parse(g.iso)) < 1000) { out.push({ externalId: g.externalId, status: "unchanged", address: w.address }); continue; }
+    if (p.dryRun) { out.push({ externalId: g.externalId, status: "would_update", address: w.address, note: `${w.created_at.slice(0, 10)} → ${g.iso.slice(0, 10)}` }); continue; }
+    todo.push({ id: w.id, iso: g.iso, externalId: g.externalId, address: w.address });
+  }
+  let i = 0;
+  await Promise.all(Array.from({ length: 12 }, async () => {
+    while (i < todo.length) {
+      const t = todo[i++]!;
+      const { error } = await db.from("wallets").update({ created_at: t.iso }).eq("id", t.id);
+      out.push({ externalId: t.externalId, status: error ? "error" : "updated", address: t.address, ...(error ? { note: error.message.slice(0, 120) } : { note: t.iso.slice(0, 10) }) });
+    }
+  }));
+  if (!p.dryRun && todo.length) await audit({ app_id: p.appId, action: "wallet_dates_set", details: { updated: out.filter((r) => r.status === "updated").length, admin: p.actor } });
+  return out;
+}

@@ -299,13 +299,14 @@ function AppSettings({ app }: { app: AppRow }) {
 function Import({ apps }: { apps: AppRow[] }) {
   const run = useServerFn(adminImport);
   const [appId, setAppId] = useState(apps[0]?.id ?? "");
-  const [mode, setMode] = useState<"new-wallets" | "tokens">("new-wallets");
+  const [mode, setMode] = useState<"new-wallets" | "tokens" | "creation-dates">("new-wallets");
   const [csv, setCsv] = useState("");
   const [rows, setRows] = useState<{ externalId: string; status: string; address?: string; note?: string }[]>([]);
   const [busy, setBusy] = useState(false);
   const help = {
     "new-wallets": "Columns: external_id,email,kind — e.g. Loop Fans fans. Each gets a new wallet.",
     tokens: "Columns: address,name,symbol,swappable — existing Loop Do tokens to manage from here.",
+    "creation-dates": "Columns: user_id,created_at — each Loop Do user's ORIGINAL sign-up date (ISO, e.g. 2026-03-14T09:30:00Z). Only moved-in Loop Do wallets change; the Dashboard's wallet growth then shows real dates instead of the import day. Choose Loop Do as the app. Preview first.",
   }[mode];
   const go = async (dryRun: boolean) => {
     setBusy(true);
@@ -322,6 +323,7 @@ function Import({ apps }: { apps: AppRow[] }) {
         <select className="h-9 rounded-md border bg-background px-2 text-sm" value={mode} onChange={(e) => setMode(e.target.value as typeof mode)}>
           <option value="new-wallets">New wallets (Loop Fans etc.)</option>
           <option value="tokens">Existing tokens</option>
+          <option value="creation-dates">Original sign-up dates (Loop Do)</option>
         </select>
       </div>
       <p className="text-sm text-muted-foreground">{help}</p>

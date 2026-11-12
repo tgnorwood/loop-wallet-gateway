@@ -108,7 +108,7 @@ function Loaded({ s }: { s: PublicStats }) {
   }, [s.walletsByDay]);
 
   const { txRows, txTypes, mix } = useMemo(() => {
-    const days = [...new Set(s.txByDay.map((x) => x.day))].sort().slice(-30);
+    const days = [...new Set(s.txByDay.map((x) => x.day))].sort();
     const types = [...new Set(s.txByDay.map((x) => x.type))];
     const rows = days.map((day) => {
       const row: Record<string, string | number> = { day };
@@ -119,7 +119,10 @@ function Loaded({ s }: { s: PublicStats }) {
     return { txRows: rows, txTypes: types, mix: m };
   }, [s.txByDay]);
 
-  const blocks = useMemo(() => s.transfersByBlock.map((b) => ({ ...b, range: `${nf.format(b.block)} – ${nf.format(b.block + s.blockBucket - 1)}` })), [s.transfersByBlock, s.blockBucket]);
+  const tokenGrowth = useMemo(() => {
+    let run = 0;
+    return s.tokensByDay.map((d) => ({ day: d.day, names: d.names, total: (run += d.n) }));
+  }, [s.tokensByDay]);
   const maxTok = Math.max(1, ...s.topTokens.map((x) => x.transfers));
 
   return (
@@ -188,9 +191,43 @@ function Loaded({ s }: { s: PublicStats }) {
           )}
         </Card>
 
-        <Card className="lg:col-span-3" title="Daily on-chain activity" subtitle="Confirmed transactions per day, last 30 days">
-          {txRows.length === 0 ? <Empty>No confirmed transactions in this period yet.</Empty> : (
+        <Card className="lg:col-span-3" title="Token transfers on Starknet" subtitle="Per day, from the first token we deployed (dates from Starknet block times)">
+          {s.transfersByDay.length === 0 ? <Empty>Transfer history is still being indexed.</Empty> : (
             <div className="h-64">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={s.transfersByDay} margin={{ left: -10, right: 8, top: 8 }}>
+                  <defs><linearGradient id="gt" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={C2} stopOpacity={0.5} /><stop offset="100%" stopColor={C2} stopOpacity={0} /></linearGradient></defs>
+                  <CartesianGrid stroke="var(--border)" vertical={false} />
+                  <XAxis dataKey="day" {...axis} tickFormatter={(d: string) => d.slice(5)} minTickGap={24} />
+                  <YAxis {...axis} tickFormatter={(v: number) => compact.format(v)} />
+                  <Tooltip contentStyle={tooltipStyle} formatter={(v: number) => [nf.format(v), "Transfers"]} labelFormatter={(d: string) => d} />
+                  <Area type="monotone" dataKey="n" stroke={C2} strokeWidth={2.5} fill="url(#gt)" />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+        </Card>
+
+        <Card className="lg:col-span-2" title="Tokens deployed" subtitle="Cumulative, by the day each went on-chain">
+          {tokenGrowth.length === 0 ? <Empty>No tokens yet.</Empty> : (
+            <div className="h-64">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={tokenGrowth} margin={{ left: -10, right: 8, top: 8 }}>
+                  <defs><linearGradient id="gk" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={COLORS[2]} stopOpacity={0.5} /><stop offset="100%" stopColor={COLORS[2]} stopOpacity={0} /></linearGradient></defs>
+                  <CartesianGrid stroke="var(--border)" vertical={false} />
+                  <XAxis dataKey="day" {...axis} tickFormatter={(d: string) => d.slice(5)} minTickGap={24} />
+                  <YAxis {...axis} allowDecimals={false} />
+                  <Tooltip contentStyle={tooltipStyle} formatter={(v: number) => [nf.format(v), "Tokens"]} labelFormatter={(d: string, p) => { const names = (p?.[0]?.payload as { names?: string[] } | undefined)?.names; return names?.length ? `${d} · new: ${names.join(", ")}` : d; }} />
+                  <Area type="stepAfter" dataKey="total" stroke={COLORS[2]} strokeWidth={2.5} fill="url(#gk)" />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+        </Card>
+
+        <Card className="lg:col-span-5" title="Actions through the wallet API" subtitle="Confirmed transactions per day since the API launched">
+          {txRows.length === 0 ? <Empty>No confirmed transactions in this period yet.</Empty> : (
+            <div className="h-56">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={txRows} margin={{ left: -10, right: 8, top: 8 }}>
                   <CartesianGrid stroke="var(--border)" vertical={false} />
@@ -198,22 +235,6 @@ function Loaded({ s }: { s: PublicStats }) {
                   <YAxis {...axis} allowDecimals={false} />
                   <Tooltip contentStyle={tooltipStyle} cursor={{ fill: "var(--secondary)", opacity: 0.4 }} />
                   {txTypes.map((ty, i) => <Bar key={ty} dataKey={ty} name={label(ty)} stackId="a" fill={COLORS[i % COLORS.length]} radius={i === txTypes.length - 1 ? [4, 4, 0, 0] : 0} />)}
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          )}
-        </Card>
-
-        <Card className="lg:col-span-2" title="Token transfers on Starknet" subtitle={`Per ${nf.format(s.blockBucket)}-block range`}>
-          {blocks.length === 0 ? <Empty>Transfer history is still being indexed.</Empty> : (
-            <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={blocks} margin={{ left: -10, right: 8, top: 8 }}>
-                  <CartesianGrid stroke="var(--border)" vertical={false} />
-                  <XAxis dataKey="block" {...axis} tickFormatter={(b: number) => compact.format(b)} minTickGap={24} />
-                  <YAxis {...axis} tickFormatter={(v: number) => compact.format(v)} />
-                  <Tooltip contentStyle={tooltipStyle} cursor={{ fill: "var(--secondary)", opacity: 0.4 }} formatter={(v: number) => [nf.format(v), "Transfers"]} labelFormatter={(b: number) => `Blocks ${nf.format(b)} – ${nf.format(b + s.blockBucket - 1)}`} />
-                  <Bar dataKey="n" fill={C2} radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </div>

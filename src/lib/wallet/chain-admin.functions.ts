@@ -92,7 +92,7 @@ export const adminMarkTest = createServerFn({ method: "POST" })
 
 const importInput = z.object({
   appId: z.string().uuid(),
-  mode: z.enum(["new-wallets", "tokens"]),
+  mode: z.enum(["new-wallets", "tokens", "creation-dates"]),
   csv: z.string().max(2_000_000),
   dryRun: z.boolean(),
 });
@@ -116,6 +116,13 @@ export const adminImport = createServerFn({ method: "POST" })
     if (data.mode === "tokens") {
       const res = await mig.importTokens({ appId: data.appId, dryRun: data.dryRun, rows: rows.filter((r) => r["address"]).map((r) => ({ address: r["address"]!, name: r["name"] || r["symbol"] || "Token", symbol: r["symbol"] || "TKN", swappable: r["swappable"] === "true" })) });
       return { rows: res.map((r) => ({ externalId: r.address, status: r.status })) };
+    }
+    if (data.mode === "creation-dates") {
+      const res = await mig.setCreationDates({
+        appId: data.appId, dryRun: data.dryRun, actor: context.userId,
+        rows: rows.map((r) => ({ externalId: r["user_id"] || r["external_id"] || "", createdAt: r["created_at"] || r["createdat"] || "" })).filter((r) => r.externalId && r.createdAt),
+      });
+      return { rows: res };
     }
     const res = await mig.importWallets({
       appId: data.appId, dryRun: data.dryRun, actor: context.userId,

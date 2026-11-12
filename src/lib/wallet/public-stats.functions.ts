@@ -10,6 +10,12 @@ export type PublicStats = {
   txByDay: { day: string; type: string; n: number }[];
   transfersByBlock: { block: number; n: number }[];
   blockBucket: number;
+  /** Token transfers grouped by the real date of the blocks they happened in. */
+  transfersByDay: { day: string; n: number }[];
+  /** When each token was deployed on Starknet (first on-chain event, or creation time for API-made tokens). */
+  tokensByDay: { day: string; n: number; names: string[] }[];
+  /** Roughly how long one chart point spans, from real block times. */
+  hoursPerBucket: number | null;
   topTokens: { name: string; symbol: string; address: string | null; holders: number; transfers: number }[];
   recent: { txHash: string; block: number; from: string; to: string; amount: string; symbol: string }[];
   exact: boolean;
@@ -17,6 +23,50 @@ export type PublicStats = {
 
 const BLOCK_BUCKET = 10_000;
 let cache: { at: number; value: PublicStats } | null = null;
+let timeline: { at: number; complete: boolean; value: Pick<PublicStats, "transfersByDay" | "tokensByDay" | "hoursPerBucket"> } | null = null;
+
+/** Date-based series built from real block timestamps. Slow-changing, so it is cached for minutes. */
+async function buildTimeline(db: Awaited<typeof import("@/integrations/supabase/client.server")>["supabaseAdmin"], buckets: { block: number; n: number }[]) {
+  if (timeline && Date.now() - timeline.at < (timeline.complete ? 5 * 60_000 : 20_000)) return timeline.value;
+  const { blockTimes, dayOf } = await import("./chain-time.server");
+
+  // First on-chain event per token = when it was deployed (the initial mint). API-made tokens use their creation time.
+  const { data: toks } = await db.from("tokens").select("id,name,symbol,created_at,imported_from").eq("is_test", false).limit(400);
+  const firstBlock = new Map<string, number>();
+  let i = 0;
+  await Promise.all(Array.from({ length: 10 }, async () => {
+    while (i < (toks?.length ?? 0)) {
+      const t = toks![i++]!;
+      if (!t.imported_from) continue;
+      const { data: e } = await db.from("chain_events").select("block_number").eq("token_id", t.id).order("block_number", { ascending: true }).limit(1).maybeSingle();
+      if (e) firstBlock.set(t.id, Number(e.block_number));
+    }
+  }));
+
+  const times = await blockTimes([...buckets.map((b) => b.block), ...firstBlock.values()]);
+  const complete = buckets.every((b) => times.has(b.block)) && [...firstBlock.values()].every((b) => times.has(b));
+
+  const perDay = new Map<string, number>();
+  for (const b of buckets) { const ts = times.get(b.block); if (ts !== undefined) perDay.set(dayOf(ts), (perDay.get(dayOf(ts)) ?? 0) + b.n); }
+  const transfersByDay = [...perDay].map(([day, n]) => ({ day, n })).sort((a, b) => a.day.localeCompare(b.day));
+
+  const tokDay = new Map<string, string[]>();
+  for (const t of toks ?? []) {
+    const fb = firstBlock.get(t.id);
+    const ts = fb !== undefined ? times.get(fb) : undefined;
+    const day = ts !== undefined ? dayOf(ts) : t.imported_from ? null : t.created_at.slice(0, 10);
+    if (!day) continue;
+    tokDay.set(day, [...(tokDay.get(day) ?? []), t.symbol || t.name]);
+  }
+  const tokensByDay = [...tokDay].map(([day, names]) => ({ day, n: names.length, names: names.slice(0, 5) })).sort((a, b) => a.day.localeCompare(b.day));
+
+  const ts = buckets.map((b) => ({ b: b.block, t: times.get(b.block) })).filter((x): x is { b: number; t: number } => x.t !== undefined);
+  const hoursPerBucket = ts.length >= 2 ? Math.max(1, Math.round(((ts[ts.length - 1]!.t - ts[0]!.t) / 3600) / ((ts[ts.length - 1]!.b - ts[0]!.b) / BLOCK_BUCKET))) : null;
+
+  const value = { transfersByDay, tokensByDay, hoursPerBucket };
+  timeline = { at: Date.now(), complete, value };
+  return value;
+}
 
 async function compute(): Promise<PublicStats> {
   const { supabaseAdmin: db } = await import("@/integrations/supabase/client.server");
@@ -73,8 +123,10 @@ async function compute(): Promise<PublicStats> {
   let latestBlock: number | null = null;
   try { const { rpcCall } = await import("./rpc.server"); latestBlock = await rpcCall<number>("starknet_blockNumber", []); } catch { /* shown as unavailable */ }
 
+  const tl = await buildTimeline(db, transfersByBlock).catch(() => ({ transfersByDay: [], tokensByDay: [], hoursPerBucket: null }));
+
   return {
-    asOf: new Date().toISOString(), network: "Starknet Sepolia", latestBlock, totals, walletsByDay, txByDay, transfersByBlock, blockBucket: BLOCK_BUCKET, exact: !!agg,
+    asOf: new Date().toISOString(), network: "Starknet Sepolia", latestBlock, totals, walletsByDay, txByDay, transfersByBlock, blockBucket: BLOCK_BUCKET, exact: !!agg, ...tl,
     topTokens: (top.data ?? []).map((t) => ({ name: t.name, symbol: t.symbol, address: t.address, holders: num(t.holder_count), transfers: num(t.event_count) })),
     recent: (recent.data ?? []).map((e) => ({ txHash: e.tx_hash, block: num(e.block_number), from: e.from_address, to: e.to_address, amount: String(e.amount), symbol: (e.tokens as unknown as { symbol: string } | null)?.symbol ?? "" })),
   };
