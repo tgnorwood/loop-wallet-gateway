@@ -5,6 +5,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { AppHeader } from "@/components/AppHeader";
 import { AdminOnly } from "@/components/AdminOnly";
+import { AdminConsole } from "@/components/DashboardPage";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
@@ -27,7 +28,13 @@ function AdminPage() {
   return (
     <div className="min-h-screen">
       <AppHeader />
-      <AdminOnly><Admin /></AdminOnly>
+      <AdminOnly>
+        <Admin />
+        <div className="mt-6 border-t">
+          <div className="mx-auto max-w-6xl px-4 pt-8"><h2 className="text-xl font-semibold">Admin console</h2><p className="text-sm text-muted-foreground">Transactions, new wallets, tokens, collections, imports and security.</p></div>
+          <AdminConsole />
+        </div>
+      </AdminOnly>
     </div>
   );
 }

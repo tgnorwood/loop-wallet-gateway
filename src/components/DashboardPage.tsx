@@ -3,36 +3,21 @@ import { useServerFn } from "@tanstack/react-start";
 import { useState } from "react";
 import { toast } from "sonner";
 import { AppHeader } from "@/components/AppHeader";
-import { SignInCard } from "@/components/SignInCard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { useAuth } from "@/hooks/use-auth";
-import { useIsAdmin } from "@/hooks/use-admin";
 import { PublicDashboard } from "@/components/PublicDashboard";
 import { fromBaseUnits, publicTransactionStatus } from "@/lib/wallet/chain-rules";
 import { adminEstimateWalletDates, adminImport, adminKeyStatus, adminLinkImportedWallet, adminMarkTest, adminNewWallets, adminResolveTransaction, adminResyncToken, adminRotateKeys, adminTokenHistory, adminUpdateAppChain, chainDashboard } from "@/lib/wallet/chain-admin.functions";
 
+/** The home page: public, aggregate numbers only. The admin console lives on the Admin page. */
 export function DashboardPage() {
-  const { user, loading } = useAuth();
-  const { isAdmin } = useIsAdmin();
-  const [showSignIn, setShowSignIn] = useState(false);
   return (
     <div className="min-h-screen">
       <AppHeader />
       <PublicDashboard />
-      {isAdmin ? (
-        <div className="border-t">
-          <div className="mx-auto max-w-6xl px-4 pt-8"><h2 className="text-xl font-semibold">Admin console</h2><p className="text-sm text-muted-foreground">Only you can see this section.</p></div>
-          <Dashboard />
-        </div>
-      ) : !loading && !user ? (
-        <div className="mx-auto max-w-6xl px-4 pb-10 text-center">
-          {showSignIn ? <div className="grid place-items-center py-6"><SignInCard title="Admin sign in" /></div> : <button className="text-xs text-muted-foreground hover:text-foreground" onClick={() => setShowSignIn(true)}>Admin sign in</button>}
-        </div>
-      ) : null}
     </div>
   );
 }
@@ -47,7 +32,8 @@ const Stat = ({ label, value, hint }: { label: string; value: string | number; h
   </div>
 );
 
-function Dashboard() {
+/** Transactions, wallets log, tokens, collections, apps, imports and security. Shown at the bottom of the Admin page. */
+export function AdminConsole() {
   const fetchDash = useServerFn(chainDashboard);
   const [appId, setAppId] = useState<string>("");
   const [status, setStatus] = useState<string>("");
