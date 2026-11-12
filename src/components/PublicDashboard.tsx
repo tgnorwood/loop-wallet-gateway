@@ -158,7 +158,7 @@ function Loaded({ s }: { s: PublicStats }) {
 
       {/* Charts */}
       <div className="grid gap-4 lg:grid-cols-5">
-        <Card className="lg:col-span-3" title="Wallet growth" subtitle="Total wallets over time">
+        <Card className="lg:col-span-3" title="Wallet growth" subtitle="Wallets created through Loop">
           {growth.length < 2 ? <Empty>Growth appears once wallets span more than a day.</Empty> : (
             <div className="h-64">
               <ResponsiveContainer width="100%" height="100%">
@@ -167,7 +167,7 @@ function Loaded({ s }: { s: PublicStats }) {
                   <CartesianGrid stroke="var(--border)" vertical={false} />
                   <XAxis dataKey="day" {...axis} tickFormatter={(d: string) => d.slice(5)} minTickGap={24} />
                   <YAxis {...axis} tickFormatter={(v: number) => compact.format(v)} />
-                  <Tooltip contentStyle={tooltipStyle} formatter={(v: number, n: string) => [nf.format(v), n === "total" ? "Total wallets" : "New that day"]} labelFormatter={(d: string) => d} />
+                  <Tooltip contentStyle={tooltipStyle} formatter={(v: number, n: string) => [nf.format(v), n === "total" ? "Wallets created through Loop" : "New that day"]} labelFormatter={(d: string) => d} />
                   <Area type="monotone" dataKey="total" stroke={C1} strokeWidth={2.5} fill="url(#gw)" />
                 </AreaChart>
               </ResponsiveContainer>
