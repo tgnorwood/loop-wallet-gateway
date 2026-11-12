@@ -16,6 +16,7 @@ import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as DemoRouteImport } from './routes/demo'
 import { Route as DocsRouteImport } from './routes/docs'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
+import { Route as WalletRouteImport } from './routes/wallet'
 import { Route as ConnectSignRouteImport } from './routes/connect.sign'
 import { Route as ApiPublicJobsWalletWorkerRouteImport } from './routes/api/public/jobs/wallet-worker'
 import { Route as ApiPublicV1SplatRouteImport } from './routes/api/public/v1/$'
@@ -60,6 +61,11 @@ const DocsRoute = DocsRouteImport.update({
 const ResetPasswordRoute = ResetPasswordRouteImport.update({
   id: '/reset-password',
   path: '/reset-password',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const WalletRoute = WalletRouteImport.update({
+  id: '/wallet',
+  path: '/wallet',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ConnectSignRoute = ConnectSignRouteImport.update({
@@ -127,6 +133,7 @@ export interface FileRoutesByFullPath {
   '/demo': typeof DemoRoute
   '/docs': typeof DocsRoute
   '/reset-password': typeof ResetPasswordRoute
+  '/wallet': typeof WalletRoute
   '/connect/sign': typeof ConnectSignRoute
   '/api/public/jobs/wallet-worker': typeof ApiPublicJobsWalletWorkerRoute
   '/api/public/v1/$': typeof ApiPublicV1SplatRoute
@@ -146,6 +153,7 @@ export interface FileRoutesByTo {
   '/demo': typeof DemoRoute
   '/docs': typeof DocsRoute
   '/reset-password': typeof ResetPasswordRoute
+  '/wallet': typeof WalletRoute
   '/connect/sign': typeof ConnectSignRoute
   '/api/public/jobs/wallet-worker': typeof ApiPublicJobsWalletWorkerRoute
   '/api/public/v1/$': typeof ApiPublicV1SplatRoute
@@ -166,6 +174,7 @@ export interface FileRoutesById {
   '/demo': typeof DemoRoute
   '/docs': typeof DocsRoute
   '/reset-password': typeof ResetPasswordRoute
+  '/wallet': typeof WalletRoute
   '/connect/sign': typeof ConnectSignRoute
   '/api/public/jobs/wallet-worker': typeof ApiPublicJobsWalletWorkerRoute
   '/api/public/v1/$': typeof ApiPublicV1SplatRoute
@@ -187,6 +196,7 @@ export interface FileRouteTypes {
     | '/demo'
     | '/docs'
     | '/reset-password'
+    | '/wallet'
     | '/connect/sign'
     | '/api/public/jobs/wallet-worker'
     | '/api/public/v1/$'
@@ -206,6 +216,7 @@ export interface FileRouteTypes {
     | '/demo'
     | '/docs'
     | '/reset-password'
+    | '/wallet'
     | '/connect/sign'
     | '/api/public/jobs/wallet-worker'
     | '/api/public/v1/$'
@@ -225,6 +236,7 @@ export interface FileRouteTypes {
     | '/demo'
     | '/docs'
     | '/reset-password'
+    | '/wallet'
     | '/connect/sign'
     | '/api/public/jobs/wallet-worker'
     | '/api/public/v1/$'
@@ -245,6 +257,7 @@ export interface RootRouteChildren {
   DemoRoute: typeof DemoRoute
   DocsRoute: typeof DocsRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
+  WalletRoute: typeof WalletRoute
   ApiPublicJobsWalletWorkerRoute: typeof ApiPublicJobsWalletWorkerRoute
   ApiPublicV1SplatRoute: typeof ApiPublicV1SplatRoute
   ApiPublicV1OauthTokenRoute: typeof ApiPublicV1OauthTokenRoute
@@ -305,6 +318,13 @@ declare module '@tanstack/react-router' {
       path: '/reset-password'
       fullPath: '/reset-password'
       preLoaderRoute: typeof ResetPasswordRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/wallet': {
+      id: '/wallet'
+      path: '/wallet'
+      fullPath: '/wallet'
+      preLoaderRoute: typeof WalletRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/connect/sign': {
@@ -399,6 +419,7 @@ const rootRouteChildren: RootRouteChildren = {
   DemoRoute: DemoRoute,
   DocsRoute: DocsRoute,
   ResetPasswordRoute: ResetPasswordRoute,
+  WalletRoute: WalletRoute,
   ApiPublicJobsWalletWorkerRoute: ApiPublicJobsWalletWorkerRoute,
   ApiPublicV1SplatRoute: ApiPublicV1SplatRoute,
   ApiPublicV1OauthTokenRoute: ApiPublicV1OauthTokenRoute,

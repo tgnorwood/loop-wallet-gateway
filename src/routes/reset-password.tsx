@@ -29,7 +29,7 @@ function Reset() {
           const { error } = await supabase.auth.updateUser({ password: pw });
           if (error) { toast.error(error.message); return; }
           toast.success("Password updated");
-          nav({ to: "/" });
+          nav({ to: "/wallet" });
         }}
       >
         <h1 className="text-xl font-semibold">Set a new password</h1>

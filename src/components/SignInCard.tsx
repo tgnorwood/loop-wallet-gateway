@@ -41,6 +41,8 @@ export function SignInCard({ title = "Sign in to your wallet", subtitle }: { tit
   }
 
   async function google() {
+    // Google returns to the site root; remember this page so we can send the person back to it.
+    try { sessionStorage.setItem("lw:return", window.location.pathname + window.location.search); } catch { /* ignore */ }
     const r = await lovable.auth.signInWithOAuth("google", { redirect_uri: window.location.origin });
     if (r.error) toast.error(String((r.error as Error).message ?? r.error));
     else if (!r.redirected && window.location.pathname !== "/") window.location.reload();
