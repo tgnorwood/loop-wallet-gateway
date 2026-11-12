@@ -102,10 +102,14 @@ function Loading() {
 function Loaded({ s }: { s: PublicStats }) {
   const t = s.totals;
 
+  // Two layers: wallets created in the wallet system, and wallets migrated in from Loop Do. The totals add up to all wallets.
   const growth = useMemo(() => {
-    let run = 0;
-    return s.walletsByDay.map((d) => ({ day: d.day, new: d.n, total: (run += d.n) }));
-  }, [s.walletsByDay]);
+    const days = [...new Set([...s.walletsByDay.map((d) => d.day), ...s.migratedByDay.map((d) => d.day)])].sort();
+    const all = new Map(s.walletsByDay.map((d) => [d.day, d.n]));
+    const mig = new Map(s.migratedByDay.map((d) => [d.day, d.n]));
+    let a = 0, m = 0;
+    return days.map((day) => { const mi = mig.get(day) ?? 0; a += (all.get(day) ?? 0) - mi; m += mi; return { day, created: a, migrated: m }; });
+  }, [s.walletsByDay, s.migratedByDay]);
 
   const { txRows, txTypes, mix } = useMemo(() => {
     const days = [...new Set(s.txByDay.map((x) => x.day))].sort();
@@ -158,17 +162,22 @@ function Loaded({ s }: { s: PublicStats }) {
 
       {/* Charts */}
       <div className="grid gap-4 lg:grid-cols-5">
-        <Card className="lg:col-span-3" title="Wallet growth" subtitle="Total wallets over time">
+        <Card className="lg:col-span-3" title="Wallet growth" subtitle="Created in the wallet system, plus wallets migrated in from Loop Do">
           {growth.length < 2 ? <Empty>Growth appears once wallets span more than a day.</Empty> : (
             <div className="h-64">
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={growth} margin={{ left: -10, right: 8, top: 8 }}>
-                  <defs><linearGradient id="gw" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={C1} stopOpacity={0.55} /><stop offset="100%" stopColor={C1} stopOpacity={0} /></linearGradient></defs>
+                  <defs>
+                    <linearGradient id="gw" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={C1} stopOpacity={0.55} /><stop offset="100%" stopColor={C1} stopOpacity={0.05} /></linearGradient>
+                    <linearGradient id="gm" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={C2} stopOpacity={0.5} /><stop offset="100%" stopColor={C2} stopOpacity={0.05} /></linearGradient>
+                  </defs>
                   <CartesianGrid stroke="var(--border)" vertical={false} />
                   <XAxis dataKey="day" {...axis} tickFormatter={(d: string) => d.slice(5)} minTickGap={24} />
                   <YAxis {...axis} tickFormatter={(v: number) => compact.format(v)} />
-                  <Tooltip contentStyle={tooltipStyle} formatter={(v: number, n: string) => [nf.format(v), n === "total" ? "Total wallets" : "New that day"]} labelFormatter={(d: string) => d} />
-                  <Area type="monotone" dataKey="total" stroke={C1} strokeWidth={2.5} fill="url(#gw)" />
+                  <Tooltip contentStyle={tooltipStyle} formatter={(v: number, n: string) => [nf.format(v), n]} labelFormatter={(d: string) => d} />
+                  <Legend iconType="circle" wrapperStyle={{ fontSize: 11 }} />
+                  <Area type="monotone" dataKey="migrated" name="Migrated from Loop Do" stackId="w" stroke={C2} strokeWidth={2} fill="url(#gm)" />
+                  <Area type="monotone" dataKey="created" name="Created in the wallet system" stackId="w" stroke={C1} strokeWidth={2} fill="url(#gw)" />
                 </AreaChart>
               </ResponsiveContainer>
             </div>

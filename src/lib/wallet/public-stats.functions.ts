@@ -7,6 +7,8 @@ export type PublicStats = {
   latestBlock: number | null;
   totals: { wallets: number; accountsDeployed: number; tokens: number; collections: number; nfts: number; transfers: number; holders: number; sponsoredTx: number; apps: number };
   walletsByDay: { day: string; n: number }[];
+  /** Of those, the wallets moved in from Loop Do (by their recorded date). */
+  migratedByDay: { day: string; n: number }[];
   txByDay: { day: string; type: string; n: number }[];
   transfersByBlock: { block: number; n: number }[];
   blockBucket: number;
@@ -123,10 +125,15 @@ async function compute(): Promise<PublicStats> {
   let latestBlock: number | null = null;
   try { const { rpcCall } = await import("./rpc.server"); latestBlock = await rpcCall<number>("starknet_blockNumber", []); } catch { /* shown as unavailable */ }
 
+  const { data: mig } = await db.from("wallets").select("created_at").like("imported_from", "loop-do%").is("retired_at", null).limit(20000);
+  const md = new Map<string, number>();
+  for (const w of mig ?? []) { const d = w.created_at.slice(0, 10); md.set(d, (md.get(d) ?? 0) + 1); }
+  const migratedByDay = [...md].map(([day, n]) => ({ day, n })).sort((a, b) => a.day.localeCompare(b.day));
+
   const tl = await buildTimeline(db, transfersByBlock).catch(() => ({ transfersByDay: [], tokensByDay: [], hoursPerBucket: null }));
 
   return {
-    asOf: new Date().toISOString(), network: "Starknet Sepolia", latestBlock, totals, walletsByDay, txByDay, transfersByBlock, blockBucket: BLOCK_BUCKET, exact: !!agg, ...tl,
+    asOf: new Date().toISOString(), network: "Starknet Sepolia", latestBlock, totals, walletsByDay, migratedByDay, txByDay, transfersByBlock, blockBucket: BLOCK_BUCKET, exact: !!agg, ...tl,
     topTokens: (top.data ?? []).map((t) => ({ name: t.name, symbol: t.symbol, address: t.address, holders: num(t.holder_count), transfers: num(t.event_count) })),
     recent: (recent.data ?? []).map((e) => ({ txHash: e.tx_hash, block: num(e.block_number), from: e.from_address, to: e.to_address, amount: String(e.amount), symbol: (e.tokens as unknown as { symbol: string } | null)?.symbol ?? "" })),
   };
