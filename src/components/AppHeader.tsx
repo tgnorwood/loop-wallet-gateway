@@ -15,23 +15,26 @@ export function AppHeader() {
           <span className="grid h-7 w-7 place-items-center rounded-md bg-gradient-to-br from-[oklch(0.62_0.2_275)] to-[oklch(0.7_0.17_200)] font-mono text-xs text-white">LW</span>
           <span className="hidden sm:inline">Loop Wallet</span>
         </Link>
-        <nav className="flex items-center gap-1 text-sm text-muted-foreground">
-          <Link to="/" activeOptions={{ exact: true }} activeProps={active} className={link}>Wallet</Link>
-          <Link to="/dashboard" activeProps={active} className={link}>Dashboard</Link>
-          {isAdmin && (
-            <>
-              <span className="mx-1 h-4 w-px bg-border" aria-hidden />
-              <Link to="/admin" activeProps={active} className={link}>Admin</Link>
-              <Link to="/demo" activeProps={active} className={link}>Sandbox</Link>
-              <Link to="/docs" activeProps={active} className={link}>Docs</Link>
-            </>
+        <div className="ml-auto flex items-center gap-1 sm:gap-2">
+          <nav className="flex items-center gap-1 text-sm text-muted-foreground">
+            <Link to="/" activeOptions={{ exact: true }} activeProps={active} className={link}>Wallet</Link>
+            <Link to="/dashboard" activeProps={active} className={link}>Dashboard</Link>
+            {isAdmin && (
+              <>
+                <span className="mx-1 h-4 w-px bg-border" aria-hidden />
+                <Link to="/admin" activeProps={active} className={link}>Admin</Link>
+                <Link to="/demo" activeProps={active} className={link}>Sandbox</Link>
+                <Link to="/docs" activeProps={active} className={link}>Docs</Link>
+              </>
+            )}
+          </nav>
+          <span className="mx-1 h-4 w-px bg-border" aria-hidden />
+          {user ? (
+            <button onClick={() => supabase.auth.signOut()} className="whitespace-nowrap rounded-md px-2 py-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground sm:px-3">Sign out</button>
+          ) : (
+            <Link to="/" className="whitespace-nowrap rounded-md px-2 py-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground sm:px-3">Sign in</Link>
           )}
-        </nav>
-        {user ? (
-          <button onClick={() => supabase.auth.signOut()} className="ml-auto whitespace-nowrap text-sm text-muted-foreground hover:text-foreground">Sign out</button>
-        ) : (
-          <Link to="/" className="ml-auto whitespace-nowrap text-sm text-muted-foreground hover:text-foreground">Sign in</Link>
-        )}
+        </div>
       </div>
     </header>
   );
