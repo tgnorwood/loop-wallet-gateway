@@ -22,8 +22,9 @@ POST /wallets
 
 Rules for the two flags:
 
-- **`signInMethod`**: `"google"` for Google sign-in, `"password"` for email + password, otherwise `"other"`. If omitted it is treated as `"other"` and needs a code. Never claim `"google"` for a password sign-in.
-- **`emailVerified`**: send `true` only when your own sign-in genuinely proved the user owns the email (Google, or a confirm-your-email link) **and** an admin has marked your app trusted for this. Otherwise send `false` or omit it. If your sign-up auto-confirms emails without a click, send `false`.
+- **`signInMethod`**: `"google"` for Google sign-in, `"password"` for email + password, otherwise `"other"`. If omitted it is treated as `"other"`. Never claim `"google"` for a password sign-in.
+- **Google users are verified automatically.** When an app an admin has marked **"Trusted for Google sign-in"** sends `signInMethod: "google"`, the gateway marks the wallet's email as verified (for a new sign-up, for a returning sign-in, and for a user who already had an unverified wallet) and never asks that person for a code. If the app is not marked trusted, a Google claim is ignored and the normal rules apply.
+- **`emailVerified`**: for password users, send `true` only when your own sign-in genuinely proved the email (a confirm-your-email link) **and** the app is trusted. Otherwise send `false` or omit it. If your sign-up auto-confirms emails without a click, send `false`.
 
 Friction: brand-new emails never see a code. A code appears only when an email that already has a wallet signs up from a second place with a password. Someone who signs up with an email they do not own can never take over a real owner's wallet: when the real owner proves the email (code or Google), the earlier unverified sign-up loses access.
 

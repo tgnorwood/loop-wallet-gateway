@@ -404,7 +404,14 @@ export async function ensureOwnerWallet(userId: string, email: string, method: s
     catch (e) { await audit({ wallet_id: unowned.id, action: "loop_do_claim_needs_admin", ip, details: { error: (e as Error).message } }); }
   }
   const { data: linked } = await db.from("wallets").select("*").eq("user_id", userId).maybeSingle();
-  if (linked) return linked;
+  if (linked) {
+    // Signing in with Google proves the email: mark it verified (and drop anyone who only typed it in elsewhere).
+    if (google && !linked.email_verified_at && linked.email && normalizeEmail(linked.email) === lower) {
+      await evictUnverifiedControllers(linked.id, { userId }, ip, "google");
+      return { ...linked, email_verified_at: new Date().toISOString() };
+    }
+    return linked;
+  }
   // Google vouches for the address. A password sign-up is not proof until the person later enters an emailed code.
   const w = await insertWallet(lower, { user_id: userId, verified: true, emailProven: google, method });
   await audit({ wallet_id: w.id, action: "wallet_created", method, ip });

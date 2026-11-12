@@ -182,12 +182,21 @@ async function walletByEmail(network: string, email: string) {
   return null;
 }
 
+/** A person signs in with Google through a trusted app: Google has verified the email, so mark it verified (and drop anyone who only typed the address in). */
+async function verifyOnGoogleSignIn(ctx: Ctx, w: { id: string; email: string | null; email_verified_at: string | null } | null, b: { email?: string | undefined; signInMethod?: string | undefined; externalId: string }) {
+  const trusted = !!(ctx.app as { trusted_oauth?: boolean }).trusted_oauth;
+  if (!w || !trusted || b.signInMethod !== "google" || !b.email || w.email_verified_at || !w.email) return;
+  if (normalizeEmail(w.email) !== normalizeEmail(b.email)) return;
+  const { evictUnverifiedControllers } = await import("./service.server");
+  await evictUnverifiedControllers(w.id, { appId: ctx.app.id, network: ctx.network, externalId: b.externalId }, ctx.ip, "google");
+}
+
 async function createWallet(ctx: Ctx) {
   const b = parse(z.object({ externalId: str(200), kind: z.enum(["user", "collection_owner", "treasury"]).default("user"), label: z.string().max(200).optional(), email: z.string().email().max(254).optional(), emailVerified: z.boolean().optional(), signInMethod: z.enum(["google", "password", "other"]).optional() }), ctx.body);
   const { data: linkRow } = await db.from("wallet_app_links").select("wallet_id").eq("app_id", ctx.app.id).eq("network", ctx.network).eq("external_id", b.externalId).maybeSingle();
-  if (linkRow) { const { data: lw } = await db.from("wallets").select("*").eq("id", linkRow.wallet_id).single(); return json({ ...walletDto(lw!), externalId: b.externalId, reused: true }, 200); }
+  if (linkRow) { const { data: lw } = await db.from("wallets").select("*").eq("id", linkRow.wallet_id).single(); await verifyOnGoogleSignIn(ctx, lw, b); return json({ ...walletDto(lw!), externalId: b.externalId, reused: true }, 200); }
   const { data: existing } = await db.from("wallets").select("*").eq("app_id", ctx.app.id).eq("network", ctx.network).eq("external_id", b.externalId).maybeSingle();
-  if (existing) return json(walletDto(existing), 200);
+  if (existing) { await verifyOnGoogleSignIn(ctx, existing, b); return json(walletDto(existing), 200); }
   const trusted = !!(ctx.app as { trusted_oauth?: boolean }).trusted_oauth;
   // Same email = same wallet across apps, but only after proof: an emailed code, unless the user came via Google and the admin trusts this app for Google.
   if (b.email && b.kind === "user") {
@@ -216,7 +225,7 @@ async function createWallet(ctx: Ctx) {
   if (email) { const { data: taken } = await db.from("wallets").select("id").eq("email", email).eq("network", ctx.network).maybeSingle(); if (taken) email = null; }
   // The email is stored so one person can later be matched to one wallet, but it only counts as verified when this
   // app is trusted to say so. Otherwise whoever proves the email later takes the wallet over (see linkToApp).
-  const proven = !!email && emailVerifiedEffective(b.emailVerified, trusted);
+  const proven = !!email && emailVerifiedEffective(b.emailVerified, trusted, b.signInMethod);
   const sealed = await sealKey(w.privateKey);
   const row = (e: string | null) => ({
     app_id: ctx.app.id, network: ctx.network, external_id: b.externalId, kind: b.kind, label: b.label ?? null, email: e, email_verified_at: e && proven ? new Date().toISOString() : null,

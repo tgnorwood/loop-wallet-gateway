@@ -62,9 +62,13 @@ export function needsEmailProof(p: { walletExists: boolean; alreadyLinked: boole
 
 export const normalizeEmail = (e: string) => e.trim().toLowerCase();
 
-/** An app's "this email is verified" claim is only believed when the admin flagged the app as trusted. */
-export function emailVerifiedEffective(claimed: boolean | undefined, appTrusted: boolean) {
-  return claimed === true && appTrusted;
+/**
+ * Is this sign-up's email verified? Only for apps the admin marked "Trusted for Google sign-in", and only when
+ * Google signed the person in (Google has already verified the address) or the app says its own sign-in verified it.
+ * An untrusted app can claim neither.
+ */
+export function emailVerifiedEffective(claimed: boolean | undefined, appTrusted: boolean, method?: string) {
+  return appTrusted && (claimed === true || method === "google");
 }
 
 /**

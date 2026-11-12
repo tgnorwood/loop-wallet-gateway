@@ -4,12 +4,23 @@ import {
 } from "@/lib/wallet/rules";
 import { publicTransactionStatus } from "@/lib/wallet/chain-rules";
 
-describe("an app's 'email verified' claim", () => {
-  it("is only believed for apps the admin trusts", () => {
-    expect(emailVerifiedEffective(true, true)).toBe(true);
-    expect(emailVerifiedEffective(true, false)).toBe(false);
+describe("when a sign-up's email counts as verified", () => {
+  it("Google sign-in through a trusted app is verified without any flag", () => {
+    expect(emailVerifiedEffective(undefined, true, "google")).toBe(true);
+    expect(emailVerifiedEffective(false, true, "google")).toBe(true);
+  });
+  it("an explicit claim is believed only from a trusted app", () => {
+    expect(emailVerifiedEffective(true, true, "password")).toBe(true);
+    expect(emailVerifiedEffective(true, false, "password")).toBe(false);
+  });
+  it("an untrusted app can never mark an email verified, even by saying Google", () => {
+    expect(emailVerifiedEffective(true, false, "google")).toBe(false);
+    expect(emailVerifiedEffective(undefined, false, "google")).toBe(false);
+  });
+  it("password or unknown sign-ins are not verified on their own", () => {
+    expect(emailVerifiedEffective(undefined, true, "password")).toBe(false);
+    expect(emailVerifiedEffective(undefined, true, "other")).toBe(false);
     expect(emailVerifiedEffective(undefined, true)).toBe(false);
-    expect(emailVerifiedEffective(false, true)).toBe(false);
   });
 });
 
