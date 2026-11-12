@@ -134,9 +134,6 @@ function Loaded({ s }: { s: PublicStats }) {
           {s.latestBlock != null && <span className="rounded-full border bg-background/50 px-3 py-1 font-mono backdrop-blur">block {nf.format(s.latestBlock)}</span>}
         </div>
         <h1 className="mt-5 max-w-3xl text-3xl font-bold leading-tight tracking-tight sm:text-5xl">One wallet for every Loop app, running on Starknet.</h1>
-        <p className="mt-3 max-w-2xl text-sm text-muted-foreground sm:text-base">
-          Every wallet is a Starknet account with gas paid for the user. Tokens, NFTs and swaps for {t.apps || "our"} apps settle on-chain through two factory contracts. These numbers are live.
-        </p>
         <div className="mt-8 grid gap-6 sm:grid-cols-3">
           <div><Counter value={t.wallets} className="text-4xl font-bold tracking-tight sm:text-5xl" /><p className="mt-1 text-sm text-muted-foreground">wallets created</p></div>
           <div><Counter value={t.transfers} className="text-4xl font-bold tracking-tight sm:text-5xl" /><p className="mt-1 text-sm text-muted-foreground">token transfers on Starknet</p></div>
