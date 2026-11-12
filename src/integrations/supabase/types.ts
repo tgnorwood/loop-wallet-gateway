@@ -933,6 +933,14 @@ export type Database = {
         }[]
       }
       recompute_token_holders: { Args: { _token: string }; Returns: undefined }
+      wallet_first_activity: {
+        Args: never
+        Returns: {
+          address: string
+          first_block: number
+          wallet_id: string
+        }[]
+      }
     }
     Enums: {
       app_role: "admin" | "user"
