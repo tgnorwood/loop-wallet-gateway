@@ -924,6 +924,7 @@ export type Database = {
         }
         Returns: boolean
       }
+      public_dashboard_stats: { Args: never; Returns: Json }
       rate_limit_hit: {
         Args: { _key: string; _max: number; _window_ms: number }
         Returns: {

@@ -64,6 +64,13 @@
       "when": 1794447006605,
       "tag": "0008_rate_limit_hit_and_wallet_grants_reapply",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1794447105230,
+      "tag": "0009_public_dashboard_stats",
+      "breakpoints": true
     }
   ]
 }
