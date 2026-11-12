@@ -924,6 +924,13 @@ export type Database = {
         }
         Returns: boolean
       }
+      rate_limit_hit: {
+        Args: { _key: string; _max: number; _window_ms: number }
+        Returns: {
+          allowed: boolean
+          retry_after: number
+        }[]
+      }
       recompute_token_holders: { Args: { _token: string }; Returns: undefined }
     }
     Enums: {
