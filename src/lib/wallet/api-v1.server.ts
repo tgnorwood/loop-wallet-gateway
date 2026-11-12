@@ -305,10 +305,16 @@ async function nftRow(c: { id: string }, tokenId: string) {
 export async function dispatchV1(request: Request, path: string): Promise<Response> {
   const url = new URL(request.url);
   const m = request.method.toUpperCase();
+  let logAppId: string | null = null;
+  /** Server-side failures (not the caller's mistakes) are recorded so the admin Issues tab can show them. */
+  const logApiError = async (code: string, message: string) => {
+    try { await audit({ app_id: logAppId, action: "api_error", method: `${m} /v1/${path}`.slice(0, 120), details: { code, message: message.slice(0, 300) } }); } catch { /* never block the response */ }
+  };
   try {
     const bearer = /^Bearer\s+(\S+)$/i.exec(request.headers.get("authorization") ?? "")?.[1] ?? request.headers.get("x-app-key");
     let app: App;
     try { app = (await appFromKey(bearer)) as App; } catch { return err(401, "UNAUTHORIZED", "missing or invalid app API key"); }
+    logAppId = app.id;
     if (!app.api_enabled) return err(403, "UNAUTHORIZED", "API access is disabled for this app");
     try { await rateLimit(`v1:${app.id}`, app.rate_limit_per_min ?? 60, 60_000, { failOpen: true }); }
     catch (e) { return err(429, "RATE_LIMITED", "too many requests; wait for Retry-After seconds", { retry_after: (e as { extra?: { retry_after?: number } }).extra?.retry_after ?? 5 }); }
@@ -489,10 +495,12 @@ export async function dispatchV1(request: Request, path: string): Promise<Respon
     // Duck-typed: module instances can differ under dev reloads, so instanceof is unreliable.
     const k = e as { status?: unknown; code?: unknown; message?: string; details?: Record<string, unknown> };
     if (typeof k.status === "number" && typeof k.code === "string") {
+      if (k.status >= 500) await logApiError(k.code, k.message ?? "");
       return err(k.status, e instanceof ApiError ? k.code.toUpperCase() : k.code, k.message, k.details);
     }
     if (e instanceof Error && /amount must be|decimal places/.test(e.message)) return err(400, "VALIDATION", e.message);
     console.error("v1 error", e);
+    await logApiError("SERVER_ERROR", e instanceof Error ? e.message : String(e));
     return err(500, "SERVER_ERROR", "unexpected error");
   }
 }

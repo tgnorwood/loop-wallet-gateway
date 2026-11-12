@@ -9,8 +9,10 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PublicDashboard } from "@/components/PublicDashboard";
+import { Resolve } from "@/components/ResolveTx";
+import { IssuesPanel, useIssues } from "@/components/AdminIssues";
 import { fromBaseUnits, publicTransactionStatus } from "@/lib/wallet/chain-rules";
-import { adminEstimateWalletDates, adminImport, adminKeyStatus, adminLinkImportedWallet, adminMarkTest, adminNewWallets, adminResolveTransaction, adminResyncToken, adminRotateKeys, adminTokenHistory, adminUpdateAppChain, chainDashboard } from "@/lib/wallet/chain-admin.functions";
+import { adminEstimateWalletDates, adminImport, adminKeyStatus, adminLinkImportedWallet, adminMarkTest, adminNewWallets, adminResyncToken, adminRotateKeys, adminTokenHistory, adminUpdateAppChain, chainDashboard } from "@/lib/wallet/chain-admin.functions";
 
 /** The home page: public, aggregate numbers only. The admin console lives on the Admin page. */
 export function DashboardPage() {
@@ -35,6 +37,7 @@ const Stat = ({ label, value, hint }: { label: string; value: string | number; h
 /** Transactions, wallets log, tokens, collections, apps, imports and security. Shown at the bottom of the Admin page. */
 export function AdminConsole() {
   const fetchDash = useServerFn(chainDashboard);
+  const issues = useIssues();
   const [appId, setAppId] = useState<string>("");
   const [status, setStatus] = useState<string>("");
   const [hideTest, setHideTest] = useState(true);
@@ -81,8 +84,9 @@ export function AdminConsole() {
         <Stat label="Loop Do wallets moved in" value={s.loopDoImported} hint={s.loopDoImported && s.loopDoLastAt ? `${s.loopDoLegacy} old type (not gas-free) · last ${new Date(s.loopDoLastAt).toLocaleString()}` : "not started"} />
       </div>
 
-      <Tabs defaultValue="log">
+      <Tabs defaultValue="issues">
         <TabsList className="h-auto flex-wrap justify-start">
+          <TabsTrigger value="issues">Issues{issues.data && issues.data.issueCount > 0 ? <span className="ml-1.5 rounded-full bg-destructive px-1.5 text-[10px] text-destructive-foreground">{issues.data.issueCount}</span> : null}</TabsTrigger>
           <TabsTrigger value="log">Activity log</TabsTrigger>
           <TabsTrigger value="wallets">New wallets</TabsTrigger>
           <TabsTrigger value="transfers">Transfers</TabsTrigger>
@@ -94,6 +98,8 @@ export function AdminConsole() {
           <TabsTrigger value="users">Users</TabsTrigger>
           <TabsTrigger value="security">Security</TabsTrigger>
         </TabsList>
+
+        <TabsContent value="issues" className="rounded-xl border bg-card p-4"><IssuesPanel /></TabsContent>
 
         <TabsContent value="users" className="rounded-xl border bg-card p-4"><LinkWallet /></TabsContent>
         <TabsContent value="security" className="rounded-xl border bg-card p-4"><KeyPanel /></TabsContent>
@@ -366,29 +372,6 @@ function LinkWallet() {
         <Button disabled={busy || !email || !address} onClick={() => run(false)}>Check</Button>
       )}
     </div>
-  );
-}
-
-function Resolve({ id, hasHash }: { id: string; hasHash: boolean }) {
-  const resolve = useServerFn(adminResolveTransaction);
-  const qc = useQueryClient();
-  async function go(action: "attach_hash" | "mark_failed" | "requeue") {
-    let txHash: string | undefined;
-    if (action === "attach_hash") {
-      txHash = window.prompt("Paste the transaction hash you found on Voyager (0x…):")?.trim();
-      if (!txHash) return;
-    } else if (action === "mark_failed") {
-      if (!window.confirm("Only do this if you checked the chain and the transaction did NOT happen. Mark it failed?")) return;
-    } else if (!window.confirm("Send it again? If the first attempt actually reached the chain this will do the action twice. Check Voyager first.")) return;
-    const r = await resolve({ data: { id, action, ...(txHash ? { txHash } : {}) } }).catch((e) => ({ ok: false as const, error: (e as Error).message }));
-    if (r.ok) { toast.success("Updated"); void qc.invalidateQueries({ queryKey: ["chain-dash"] }); } else toast.error(r.error);
-  }
-  return (
-    <span className="flex gap-1">
-      <Button size="sm" variant="outline" onClick={() => go("attach_hash")}>Found on chain</Button>
-      <Button size="sm" variant="outline" onClick={() => go("mark_failed")}>Didn't happen</Button>
-      {!hasHash && <Button size="sm" variant="outline" onClick={() => go("requeue")}>Send again</Button>}
-    </span>
   );
 }
 

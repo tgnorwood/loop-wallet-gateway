@@ -256,3 +256,65 @@ export const adminEstimateWalletDates = createServerFn({ method: "POST" })
     try { return await mig.estimateWalletDates({ dryRun: data.dryRun, actor: context.userId }); }
     catch (e) { return { ok: false as const, error: (e as Error).message }; }
   });
+
+// ---------- everything that needs attention ----------
+export const adminIssues = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await assertAdmin(context.supabase, context.userId);
+    const sb = context.supabase;
+    const ago = (ms: number) => new Date(Date.now() - ms).toISOString();
+    const [unknownQ, failedQ, queuedQ, submittedQ, hooksQ, hooksFailedQ, otpQ, legacyQ, errQ, tokQ, appsQ] = await Promise.all([
+      sb.from("transactions").select("id,app_id,type,status,tx_hash,error_code,error_message,created_at,wallet_id,signer_key").eq("error_code", "SUBMISSION_UNKNOWN").in("status", ["processing", "submitted", "finalizing"]).limit(50),
+      sb.from("transactions").select("id,app_id,type,status,tx_hash,error_code,error_message,created_at,wallet_id,signer_key").eq("status", "failed").gte("created_at", ago(7 * 864e5)).order("created_at", { ascending: false }).limit(100),
+      sb.from("transactions").select("id,app_id,type,status,created_at,signer_key").eq("status", "queued").lt("created_at", ago(10 * 60_000)).order("created_at").limit(50),
+      sb.from("transactions").select("id,app_id,type,status,tx_hash,created_at,submitted_at,signer_key").eq("status", "submitted").is("error_code", null).lt("submitted_at", ago(5 * 60_000)).order("submitted_at").limit(50),
+      sb.from("webhook_deliveries").select("id,app_id,event,attempts,status,last_error,created_at,transaction_id").eq("status", "pending").gte("attempts", 3).order("created_at").limit(50),
+      sb.from("webhook_deliveries").select("id,app_id,event,attempts,status,last_error,created_at,transaction_id").eq("status", "failed").gte("created_at", ago(7 * 864e5)).order("created_at", { ascending: false }).limit(50),
+      sb.from("audit_logs").select("wallet_id,created_at").eq("action", "otp_failed").gte("created_at", ago(864e5)).limit(1000),
+      sb.from("audit_logs").select("app_id,method,created_at").eq("action", "legacy_endpoint_called").gte("created_at", ago(7 * 864e5)).limit(1000),
+      sb.from("audit_logs").select("app_id,method,details,created_at").eq("action", "api_error").gte("created_at", ago(864e5)).order("created_at", { ascending: false }).limit(40),
+      sb.from("tokens").select("id,name,symbol,address,sync_error,synced_at").not("sync_error", "is", null).limit(50),
+      sb.from("registered_apps").select("id,name"),
+    ]);
+    const appName = new Map((appsQ.data ?? []).map((a) => [a.id, a.name]));
+    const an = (id: string | null) => (id ? (appName.get(id) ?? "app") : "–");
+
+    // Wallets behind failed transactions, and wallets with lots of wrong codes.
+    const otpCount = new Map<string, number>();
+    for (const r of otpQ.data ?? []) if (r.wallet_id) otpCount.set(r.wallet_id, (otpCount.get(r.wallet_id) ?? 0) + 1);
+    const suspicious = [...otpCount].filter(([, n]) => n >= 5);
+    const walletIds = [...new Set([...(failedQ.data ?? []).map((t) => t.wallet_id).filter((x): x is string => !!x), ...suspicious.map(([id]) => id)])].slice(0, 200);
+    const { data: ws } = walletIds.length ? await sb.from("wallets").select("id,email,external_id,address,app_id").in("id", walletIds) : { data: [] as { id: string; email: string | null; external_id: string | null; address: string; app_id: string | null }[] };
+    const who = new Map((ws ?? []).map((w) => [w.id, w.email ?? (w.external_id ? `user ${w.external_id}` : w.address)]));
+
+    const tx = (t: { id: string; app_id: string; type: string; status: string; created_at: string; tx_hash?: string | null; error_code?: string | null; error_message?: string | null; wallet_id?: string | null; signer_key?: string }) => ({
+      id: t.id, app: an(t.app_id), type: t.type, status: t.status, txHash: t.tx_hash ?? null, errorCode: t.error_code ?? null, errorMessage: t.error_message ?? null,
+      createdAt: t.created_at, who: t.wallet_id ? (who.get(t.wallet_id) ?? null) : null, lane: t.signer_key ?? null,
+    });
+    const failed = (failedQ.data ?? []).map(tx);
+    const byCode: Record<string, number> = {};
+    for (const f of failed) byCode[f.errorCode ?? "UNKNOWN"] = (byCode[f.errorCode ?? "UNKNOWN"] ?? 0) + 1;
+
+    const legacy = new Map<string, { app: string; endpoint: string; n: number; last: string }>();
+    for (const r of legacyQ.data ?? []) {
+      const k = `${r.app_id}|${r.method}`; const cur = legacy.get(k);
+      legacy.set(k, { app: an(r.app_id), endpoint: r.method ?? "", n: (cur?.n ?? 0) + 1, last: !cur || r.created_at > cur.last ? r.created_at : cur.last });
+    }
+
+    const day = Date.now() - 864e5;
+    const result = {
+      unknown: (unknownQ.data ?? []).map(tx),
+      stuckQueued: (queuedQ.data ?? []).map(tx),
+      stuckSubmitted: (submittedQ.data ?? []).map(tx),
+      failed, failedByCode: byCode,
+      failedLast24h: failed.filter((f) => Date.parse(f.createdAt) > day).length,
+      webhooks: [...(hooksQ.data ?? []), ...(hooksFailedQ.data ?? [])].map((h) => ({ id: h.id, app: an(h.app_id), event: h.event, attempts: h.attempts, status: h.status, lastError: h.last_error, createdAt: h.created_at })),
+      apiErrors: (errQ.data ?? []).map((e) => ({ app: an(e.app_id), endpoint: e.method ?? "", message: String(((e.details ?? {}) as Record<string, unknown>)["message"] ?? ""), code: String(((e.details ?? {}) as Record<string, unknown>)["code"] ?? ""), createdAt: e.created_at })),
+      wrongCodes: suspicious.map(([id, n]) => ({ who: who.get(id) ?? id, attempts: n })).sort((a, b) => b.attempts - a.attempts),
+      legacyCalls: [...legacy.values()].sort((a, b) => b.n - a.n),
+      tokenSyncErrors: (tokQ.data ?? []).map((t) => ({ name: t.name, symbol: t.symbol, address: t.address, error: t.sync_error ?? "", at: t.synced_at })),
+    };
+    const issueCount = result.unknown.length + result.stuckQueued.length + result.stuckSubmitted.length + result.failedLast24h + result.webhooks.length + result.apiErrors.length + result.wrongCodes.length + result.tokenSyncErrors.length + result.legacyCalls.length;
+    return { ...result, issueCount, asOf: new Date().toISOString() };
+  });
