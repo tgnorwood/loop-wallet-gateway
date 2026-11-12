@@ -6,6 +6,7 @@ import tokenAbi from "./abis/MintableToken";
 import nftFactoryAbi from "./abis/NftCollectionFactory";
 import nftAbi from "./abis/MetadataNft";
 import { ACCOUNT_CLASS_HASH } from "../starknet";
+import { pooledFetch } from "../rpc.server";
 
 export const BASE_URL = "https://token-factory-console.pages.dev";
 
@@ -35,7 +36,8 @@ export function cfg(network: string): NetCfg {
 /** Strings to contracts must be bytes, never plain strings (a "7" would be stored as the number 7). */
 export const text = (s: unknown) => new TextEncoder().encode(String(s));
 
-export const provider = (network: string) => new RpcProvider({ nodeUrl: cfg(network).rpc });
+// Reads go through the failover pool (rpc.server.ts) so one rate-limited node does not break balances, receipts or syncing.
+export const provider = (network: string) => new RpcProvider({ nodeUrl: cfg(network).rpc, ...(network === "sepolia" ? { baseFetch: pooledFetch } : {}) });
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyContract = any;

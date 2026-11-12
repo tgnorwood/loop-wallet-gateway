@@ -209,3 +209,33 @@ export const adminRotateKeys = createServerFn({ method: "POST" })
     const { rotateWalletKeys } = await import("./key-rotation.server");
     try { return { ok: true as const, ...(await rotateWalletKeys(200, data.dryRun, context.userId)) }; } catch (e) { return { ok: false as const, error: (e as Error).message }; }
   });
+
+// ---------- log of newly created wallets ----------
+export const adminNewWallets = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: { appId?: string | null }) => z.object({ appId: z.string().uuid().nullish() }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.supabase, context.userId);
+    const sb = context.supabase;
+    const day = new Date(Date.now() - 864e5).toISOString();
+    const week = new Date(Date.now() - 7 * 864e5).toISOString();
+    let q = sb.from("wallets").select("id,email,address,app_id,external_id,kind,deployed,email_verified_at,imported_from,user_id,created_at,network").is("retired_at", null).order("created_at", { ascending: false }).limit(300);
+    if (data.appId) q = q.eq("app_id", data.appId);
+    const [rows, apps, total, last24, last7] = await Promise.all([
+      q,
+      sb.from("registered_apps").select("id,name"),
+      sb.from("wallets").select("id", { count: "exact", head: true }).is("retired_at", null),
+      sb.from("wallets").select("id", { count: "exact", head: true }).is("retired_at", null).gte("created_at", day),
+      sb.from("wallets").select("id", { count: "exact", head: true }).is("retired_at", null).gte("created_at", week),
+    ]);
+    const name = new Map((apps.data ?? []).map((a) => [a.id, a.name]));
+    return {
+      counts: { total: total.count ?? 0, last24h: last24.count ?? 0, last7d: last7.count ?? 0 },
+      wallets: (rows.data ?? []).map((w) => ({
+        id: w.id, createdAt: w.created_at, email: w.email, address: w.address, externalId: w.external_id, kind: w.kind, network: w.network,
+        deployed: w.deployed, emailVerified: !!w.email_verified_at,
+        app: w.app_id ? (name.get(w.app_id) ?? "app") : null,
+        source: w.imported_from ? "Imported" : w.user_id ? "Wallet portal" : "App sign-up",
+      })),
+    };
+  });

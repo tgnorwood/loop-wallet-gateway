@@ -4,7 +4,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { useState } from "react";
 import { toast } from "sonner";
 import { AppHeader } from "@/components/AppHeader";
-import { SignInCard } from "@/components/SignInCard";
+import { AdminOnly } from "@/components/AdminOnly";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
@@ -24,11 +24,10 @@ export const Route = createFileRoute("/admin")({
 });
 
 function AdminPage() {
-  const { user, loading } = useAuth();
   return (
     <div className="min-h-screen">
       <AppHeader />
-      {loading ? null : user ? <Admin /> : <div className="grid place-items-center py-16"><SignInCard title="Admin sign in" /></div>}
+      <AdminOnly><Admin /></AdminOnly>
     </div>
   );
 }

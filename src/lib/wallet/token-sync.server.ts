@@ -2,18 +2,13 @@
 import { hash } from "starknet";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { parseTransferEvents } from "./chain-rules";
-import { rpcUrl } from "./paymaster.server";
+import { rpcCall } from "./rpc.server";
 
 const db = supabaseAdmin;
 const SEL = hash.getSelectorFromName("Transfer");
 const pad = (h: string) => "0x" + BigInt(h).toString(16).padStart(64, "0");
 
-async function rpc<T>(method: string, params: unknown): Promise<T> {
-  const r = await fetch(rpcUrl(), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) });
-  const j = (await r.json()) as { result?: T; error?: { message: string } };
-  if (j.error) throw new Error(j.error.message);
-  return j.result as T;
-}
+const rpc = rpcCall;
 
 type Tok = { id: string; address: string | null; synced_block: number | null; sync_target_block: number | null; sync_continuation: string | null };
 

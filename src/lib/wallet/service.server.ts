@@ -349,11 +349,9 @@ export async function getAssets(address: string) {
   const { data: items } = await db.from("app_assets").select("kind,name,amount,metadata,created_at").eq("wallet_id", w.id);
   let strk = "0";
   try {
-    const rpc = process.env["STARKNET_RPC_URL"] ?? "https://api.zan.top/public/starknet-sepolia";
-    const res = await fetch(rpc, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
+    const { rpcFetch } = await import("./rpc.server");
+    const res = await rpcFetch(
+      JSON.stringify({
         jsonrpc: "2.0",
         id: 1,
         method: "starknet_call",
@@ -366,7 +364,7 @@ export async function getAssets(address: string) {
           block_id: "latest",
         },
       }),
-    });
+    );
     const j = (await res.json()) as { result?: string[] };
     if (j.result?.[0]) strk = (BigInt(j.result[0]) + (BigInt(j.result[1] ?? 0) << 128n)).toString();
   } catch (e) {

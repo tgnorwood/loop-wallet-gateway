@@ -1,14 +1,13 @@
 // Sponsored execution through the Token Factory AVNU paymaster proxy (ported from Loop Do).
 import { Signer } from "starknet";
+import { rpcFetch } from "./rpc.server";
 import { buildDeployment, buildTransaction, toFelt, type Call } from "./paymaster";
 
 const NETWORK = "sepolia";
 function paymasterUrl() {
   return process.env["PAYMASTER_URL"] ?? `https://token-factory-console.pages.dev/api/paymaster/${NETWORK}`;
 }
-export function rpcUrl() {
-  return process.env["STARKNET_RPC_URL"] ?? "https://api.zan.top/public/starknet-sepolia";
-}
+export { rpcUrl } from "./rpc.server";
 
 let rpcId = 0;
 async function pm(method: string, params: Record<string, unknown>) {
@@ -29,11 +28,7 @@ async function pm(method: string, params: Record<string, unknown>) {
 }
 
 export async function isDeployedOnChain(address: string) {
-  const res = await fetch(rpcUrl(), {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "starknet_getClassHashAt", params: { block_id: "latest", contract_address: address } }),
-  });
+  const res = await rpcFetch(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "starknet_getClassHashAt", params: { block_id: "latest", contract_address: address } }));
   const j = (await res.json()) as { result?: string };
   return !!j.result;
 }

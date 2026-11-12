@@ -332,3 +332,11 @@ async function ownerHoldings(walletId: string, address: string) {
   const nfts = (n.data ?? []).map((r) => ({ id: r.id, tokenId: r.token_id, collection: (r.collections as { name: string } | null)?.name ?? "" }));
   return { tokens, nfts };
 }
+
+// ---------- who am I (drives which links and pages are shown) ----------
+export const getMyRole = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const { data } = await (context.supabase.rpc as unknown as (n: string, a: object) => Promise<{ data: boolean | null }>)("has_role", { _user_id: context.userId, _role: "admin" });
+    return { isAdmin: !!data };
+  });

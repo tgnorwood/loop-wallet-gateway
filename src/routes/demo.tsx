@@ -2,10 +2,9 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useState } from "react";
 import { AppHeader } from "@/components/AppHeader";
-import { SignInCard } from "@/components/SignInCard";
+import { AdminOnly } from "@/components/AdminOnly";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { useAuth } from "@/hooks/use-auth";
 import { sandboxCall } from "@/lib/wallet/portal.functions";
 
 export const Route = createFileRoute("/demo")({
@@ -21,11 +20,10 @@ export const Route = createFileRoute("/demo")({
 });
 
 function DemoPage() {
-  const { user, loading } = useAuth();
   return (
     <div className="min-h-screen">
       <AppHeader />
-      {loading ? null : user ? <Demo /> : <div className="grid place-items-center py-16"><SignInCard title="Sign in to use the sandbox" /></div>}
+      <AdminOnly><Demo /></AdminOnly>
     </div>
   );
 }

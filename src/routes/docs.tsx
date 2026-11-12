@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { AppHeader } from "@/components/AppHeader";
+import { AdminOnly } from "@/components/AdminOnly";
 
 export const Route = createFileRoute("/docs")({
   head: () => ({
@@ -68,6 +69,7 @@ function Docs() {
   return (
     <div className="min-h-screen">
       <AppHeader />
+      <AdminOnly>
       <main className="mx-auto max-w-3xl space-y-8 px-4 py-10">
         <section>
           <h1 className="text-3xl font-bold">Connect your app</h1>
@@ -97,6 +99,7 @@ function Docs() {
           </p>
         </section>
       </main>
+      </AdminOnly>
     </div>
   );
 }

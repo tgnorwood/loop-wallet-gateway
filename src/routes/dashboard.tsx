@@ -11,8 +11,10 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuth } from "@/hooks/use-auth";
+import { useIsAdmin } from "@/hooks/use-admin";
+import { PublicDashboard } from "@/components/PublicDashboard";
 import { fromBaseUnits, publicTransactionStatus } from "@/lib/wallet/chain-rules";
-import { adminImport, adminKeyStatus, adminLinkImportedWallet, adminMarkTest, adminResolveTransaction, adminResyncToken, adminRotateKeys, adminTokenHistory, adminUpdateAppChain, chainDashboard } from "@/lib/wallet/chain-admin.functions";
+import { adminImport, adminKeyStatus, adminLinkImportedWallet, adminMarkTest, adminNewWallets, adminResolveTransaction, adminResyncToken, adminRotateKeys, adminTokenHistory, adminUpdateAppChain, chainDashboard } from "@/lib/wallet/chain-admin.functions";
 
 export const Route = createFileRoute("/dashboard")({
   head: () => ({
@@ -30,10 +32,22 @@ export const Route = createFileRoute("/dashboard")({
 
 function Page() {
   const { user, loading } = useAuth();
+  const { isAdmin } = useIsAdmin();
+  const [showSignIn, setShowSignIn] = useState(false);
   return (
     <div className="min-h-screen">
       <AppHeader />
-      {loading ? null : user ? <Dashboard /> : <div className="grid place-items-center py-16"><SignInCard title="Admin sign in" /></div>}
+      <PublicDashboard />
+      {isAdmin ? (
+        <div className="border-t">
+          <div className="mx-auto max-w-6xl px-4 pt-8"><h2 className="text-xl font-semibold">Admin console</h2><p className="text-sm text-muted-foreground">Only you can see this section.</p></div>
+          <Dashboard />
+        </div>
+      ) : !loading && !user ? (
+        <div className="mx-auto max-w-6xl px-4 pb-10 text-center">
+          {showSignIn ? <div className="grid place-items-center py-6"><SignInCard title="Admin sign in" /></div> : <button className="text-xs text-muted-foreground hover:text-foreground" onClick={() => setShowSignIn(true)}>Admin sign in</button>}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -99,6 +113,7 @@ function Dashboard() {
       <Tabs defaultValue="log">
         <TabsList className="h-auto flex-wrap justify-start">
           <TabsTrigger value="log">Activity log</TabsTrigger>
+          <TabsTrigger value="wallets">New wallets</TabsTrigger>
           <TabsTrigger value="transfers">Transfers</TabsTrigger>
           <TabsTrigger value="swaps">Swaps</TabsTrigger>
           <TabsTrigger value="tokens">Tokens</TabsTrigger>
@@ -132,6 +147,8 @@ function Dashboard() {
             </div>
           ))}
         </TabsContent>
+
+        <TabsContent value="wallets" className="rounded-xl border bg-card p-4"><NewWallets appId={appId} appName={appName} /></TabsContent>
 
         <TabsContent value="transfers">
           <TokenHistory tokens={data.tokens} />
@@ -439,6 +456,41 @@ function KeyPanel() {
         <p className="text-muted-foreground">To move onto a key you hold: generate a 64-character random key, store it in your password manager, then add it as the secret WALLET_ENCRYPTION_KEY_NEXT and reload this page.</p>
       )}
       {note && <p>{note}</p>}
+    </div>
+  );
+}
+
+function NewWallets({ appId, appName }: { appId: string; appName: (id: string) => string }) {
+  const fetchWallets = useServerFn(adminNewWallets);
+  const { data, isLoading, error } = useQuery({ queryKey: ["new-wallets", appId], queryFn: () => fetchWallets({ data: { appId: appId || null } }), refetchInterval: 15_000, retry: false });
+  void appName;
+  if (isLoading) return <p className="text-sm text-muted-foreground">Loading…</p>;
+  if (error || !data) return <p className="text-sm text-destructive">Could not load wallets.</p>;
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-3 sm:grid-cols-3">
+        <div className="rounded-lg border p-3"><p className="text-xs text-muted-foreground">Created in the last 24 hours</p><p className="text-2xl font-semibold">{data.counts.last24h}</p></div>
+        <div className="rounded-lg border p-3"><p className="text-xs text-muted-foreground">Last 7 days</p><p className="text-2xl font-semibold">{data.counts.last7d}</p></div>
+        <div className="rounded-lg border p-3"><p className="text-xs text-muted-foreground">All wallets</p><p className="text-2xl font-semibold">{data.counts.total}</p></div>
+      </div>
+      <p className="text-xs text-muted-foreground">Newest first, latest 300. Updates every 15 seconds. The app filter above applies.</p>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="text-left text-xs text-muted-foreground"><tr><th className="py-2 pr-3">Created</th><th className="pr-3">Who</th><th className="pr-3">From</th><th className="pr-3">Wallet</th><th className="pr-3">Status</th></tr></thead>
+          <tbody>
+            {data.wallets.map((w) => (
+              <tr key={w.id} className="border-t align-top">
+                <td className="whitespace-nowrap py-2 pr-3 text-muted-foreground">{new Date(w.createdAt).toLocaleString()}</td>
+                <td className="pr-3">{w.email ?? (w.externalId ? `user ${w.externalId}` : "–")}</td>
+                <td className="pr-3">{w.app ?? w.source}<span className="block text-xs text-muted-foreground">{w.source}{w.kind !== "user" ? ` · ${w.kind}` : ""}</span></td>
+                <td className="pr-3"><a className="font-mono text-xs underline" href={voyager("contract", w.address)} target="_blank" rel="noreferrer">{short(w.address)}</a></td>
+                <td className="pr-3 text-xs"><span className={w.deployed ? "text-primary" : "text-muted-foreground"}>{w.deployed ? "deployed" : "not yet deployed"}</span><span className="block text-muted-foreground">email {w.emailVerified ? "verified" : "unverified"}</span></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {data.wallets.length === 0 && <p className="py-4 text-sm text-muted-foreground">No wallets yet.</p>}
+      </div>
     </div>
   );
 }
