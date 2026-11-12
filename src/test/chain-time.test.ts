@@ -28,3 +28,13 @@ describe("real dates from block times", () => {
     expect(out.has(777_777_777)).toBe(false);
   });
 });
+
+import { interpolateTime } from "@/lib/wallet/chain-time.server";
+describe("estimating a block's time between two known blocks", () => {
+  const known: Record<number, number> = { 17_000_000: 1_000_000, 17_010_000: 1_001_000 };
+  const anchor = (b: number) => known[b];
+  it("is exact on an anchor", () => expect(interpolateTime(17_000_000, 10_000, anchor)).toBe(1_000_000));
+  it("lands proportionally in between", () => expect(interpolateTime(17_005_000, 10_000, anchor)).toBe(1_000_500));
+  it("falls back to the earlier anchor when the later one is unknown", () => expect(interpolateTime(17_015_000, 10_000, (b) => (b === 17_010_000 ? 1_001_000 : undefined))).toBe(1_001_000));
+  it("gives nothing when neither anchor is known", () => expect(interpolateTime(1, 10_000, () => undefined)).toBeUndefined());
+});

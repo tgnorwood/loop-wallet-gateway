@@ -30,3 +30,23 @@ export async function blockTimes(blocks: number[], opts: { concurrency?: number;
 }
 
 export const dayOf = (unixSeconds: number) => new Date(unixSeconds * 1000).toISOString().slice(0, 10);
+
+/** Time at `block`, interpolated between the two known anchor blocks around it. Pure, so it can be tested. */
+export function interpolateTime(block: number, step: number, anchor: (b: number) => number | undefined) {
+  const lo = Math.floor(block / step) * step;
+  const tLo = anchor(lo);
+  const tHi = anchor(lo + step);
+  if (tLo === undefined) return tHi;
+  if (tHi === undefined || block === lo) return tLo;
+  return Math.round(tLo + ((tHi - tLo) * (block - lo)) / step);
+}
+
+/** Approximate times for many blocks from ~one lookup per `step` blocks (block times are steady, so the error is hours, not days). */
+export async function estimateTimes(blocks: number[], step = 10_000, budgetMs = 15_000) {
+  const anchors = new Set<number>();
+  for (const b of blocks) { const lo = Math.floor(b / step) * step; anchors.add(lo); anchors.add(lo + step); }
+  const times = await blockTimes([...anchors], { concurrency: 8, budgetMs });
+  const out = new Map<number, number>();
+  for (const b of blocks) { const t = interpolateTime(b, step, (x) => times.get(x)); if (t !== undefined) out.set(b, t); }
+  return { times: out, complete: out.size === new Set(blocks).size };
+}

@@ -13,7 +13,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useIsAdmin } from "@/hooks/use-admin";
 import { PublicDashboard } from "@/components/PublicDashboard";
 import { fromBaseUnits, publicTransactionStatus } from "@/lib/wallet/chain-rules";
-import { adminImport, adminKeyStatus, adminLinkImportedWallet, adminMarkTest, adminNewWallets, adminResolveTransaction, adminResyncToken, adminRotateKeys, adminTokenHistory, adminUpdateAppChain, chainDashboard } from "@/lib/wallet/chain-admin.functions";
+import { adminEstimateWalletDates, adminImport, adminKeyStatus, adminLinkImportedWallet, adminMarkTest, adminNewWallets, adminResolveTransaction, adminResyncToken, adminRotateKeys, adminTokenHistory, adminUpdateAppChain, chainDashboard } from "@/lib/wallet/chain-admin.functions";
 
 export function DashboardPage() {
   const { user, loading } = useAuth();
@@ -164,6 +164,8 @@ function Dashboard() {
           {data.apps.length === 0 && <p className="text-sm text-muted-foreground">Create apps on the Admin page first.</p>}
         </TabsContent>
         <TabsContent value="import">
+          <EstimateDates />
+          <div className="h-4" />
           <Import apps={data.apps} />
         </TabsContent>
       </Tabs>
@@ -479,5 +481,39 @@ function NewWallets({ appId, appName }: { appId: string; appName: (id: string) =
         {data.wallets.length === 0 && <p className="py-4 text-sm text-muted-foreground">No wallets yet.</p>}
       </div>
     </div>
+  );
+}
+
+function EstimateDates() {
+  const run = useServerFn(adminEstimateWalletDates);
+  const qc = useQueryClient();
+  const [busy, setBusy] = useState(false);
+  const [r, setR] = useState<Awaited<ReturnType<typeof adminEstimateWalletDates>> | null>(null);
+  async function go(dryRun: boolean) {
+    if (!dryRun && !window.confirm("Change the creation date of these wallets to the estimates? Real dates from a Loop Do export are never overwritten, and you can load an export later to correct any of them.")) return;
+    setBusy(true);
+    try {
+      const x = await run({ data: { dryRun } });
+      setR(x);
+      if (!x.ok) toast.error(x.error); else { toast.success(dryRun ? "Preview ready" : `Updated ${x.updated} wallets`); if (!dryRun) void qc.invalidateQueries({ queryKey: ["public-stats"] }); }
+    } catch (e) { toast.error((e as Error).message); } finally { setBusy(false); }
+  }
+  return (
+    <section className="space-y-3 rounded-xl border bg-card p-5">
+      <h3 className="font-semibold">Estimate sign-up dates from first on-chain activity</h3>
+      <p className="text-sm text-muted-foreground">Moved-in Loop Do wallets all show the import day. This dates each one by its first transfer in or out of the wallet on Starknet. It is an estimate (the day the wallet first held or sent something, not the day the person signed up). Wallets with no activity are left alone, and real dates from an export are never overwritten.</p>
+      <div className="flex gap-2">
+        <Button variant="outline" disabled={busy} onClick={() => go(true)}>Preview</Button>
+        <Button disabled={busy || !r || !r.ok || !r.dryRun || !r.wouldUpdate} onClick={() => go(false)}>Apply estimates</Button>
+      </div>
+      {r && !r.ok && <p className="text-sm text-destructive">{r.error}</p>}
+      {r && r.ok && (
+        <div className="space-y-2 text-sm">
+          <p>{r.importedTotal} moved-in wallets · {r.withActivity} have on-chain activity · {r.noActivity} have none · {r.alreadyDated} already have a real date.</p>
+          <p>{r.dryRun ? `Would update ${r.wouldUpdate} wallets` : `Updated ${r.updated} wallets`}{r.earliest ? `, spread from ${r.earliest} to ${r.latest}.` : "."}{!r.complete && " Some block times could not be read yet; run again."}</p>
+          {r.byDay.length > 0 && <p className="font-mono text-xs text-muted-foreground">{r.byDay.slice(0, 14).map((d) => `${d.day.slice(5)}: ${d.n}`).join("  ·  ")}{r.byDay.length > 14 ? "  …" : ""}</p>}
+        </div>
+      )}
+    </section>
   );
 }

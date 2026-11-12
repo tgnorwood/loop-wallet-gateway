@@ -93,3 +93,51 @@ export async function setCreationDates(p: { appId: string; rows: { externalId: s
   if (!p.dryRun && todo.length) await audit({ app_id: p.appId, action: "wallet_dates_set", details: { updated: out.filter((r) => r.status === "updated").length, admin: p.actor } });
   return out;
 }
+
+/**
+ * Estimates when each moved-in Loop Do wallet was really created from its FIRST on-chain activity (its earliest
+ * transfer in or out). Approximate: it is the day the wallet first held or sent something, not the day the person
+ * signed up. Only wallets still carrying the import-day date are touched, so real dates loaded from a Loop Do
+ * export are never overwritten. Needs the database function wallet_first_activity() (docs/lovable-db-changes.md).
+ */
+export async function estimateWalletDates(p: { dryRun: boolean; actor: string }) {
+  const r = await (db.rpc as unknown as (n: string) => Promise<{ data: { wallet_id: string; address: string; first_block: number | string }[] | null; error: { message: string } | null }>)("wallet_first_activity");
+  if (r.error) return { ok: false as const, error: /could not find|does not exist/i.test(r.error.message) ? "The database function wallet_first_activity() is not installed yet. Ask Lovable to apply the third migration in docs/lovable-db-changes.md." : r.error.message };
+  const found = (r.data ?? []).map((x) => ({ id: x.wallet_id, block: Number(x.first_block) }));
+
+  // The import day = the day most moved-in wallets share. Only wallets dated near it still need fixing.
+  const { data: all } = await db.from("wallets").select("id,created_at").like("imported_from", "loop-do%").limit(20000);
+  const perDay = new Map<string, number>();
+  for (const w of all ?? []) perDay.set(w.created_at.slice(0, 10), (perDay.get(w.created_at.slice(0, 10)) ?? 0) + 1);
+  const importDay = [...perDay].sort((a, b) => b[1] - a[1])[0]?.[0];
+  const createdAt = new Map((all ?? []).map((w) => [w.id, w.created_at]));
+  const importedTotal = all?.length ?? 0;
+  if (!importDay) return { ok: true as const, importedTotal, withActivity: 0, noActivity: 0, alreadyDated: 0, updated: 0, earliest: null, latest: null, byDay: [] as { day: string; n: number }[], complete: true, dryRun: p.dryRun };
+  const near = (iso: string) => Math.abs(Date.parse(iso) - Date.parse(importDay + "T12:00:00Z")) <= 36 * 3600_000;
+
+  const { estimateTimes, dayOf } = await import("./chain-time.server");
+  const eligible = found.filter((f) => createdAt.has(f.id) && near(createdAt.get(f.id)!));
+  const { times, complete } = await estimateTimes(eligible.map((f) => f.block));
+  const plan = eligible.flatMap((f) => { const t = times.get(f.block); return t !== undefined && t * 1000 < Date.parse(createdAt.get(f.id)!) ? [{ id: f.id, iso: new Date(t * 1000).toISOString() }] : []; });
+
+  let updated = 0;
+  if (!p.dryRun) {
+    let i = 0;
+    await Promise.all(Array.from({ length: 12 }, async () => {
+      while (i < plan.length) {
+        const x = plan[i++]!;
+        const { error } = await db.from("wallets").update({ created_at: x.iso }).eq("id", x.id);
+        if (!error) updated++;
+      }
+    }));
+    if (updated) await audit({ action: "wallet_dates_estimated", details: { updated, import_day: importDay, admin: p.actor } });
+  }
+  const byDayMap = new Map<string, number>();
+  for (const x of plan) byDayMap.set(dayOf(Date.parse(x.iso) / 1000), (byDayMap.get(dayOf(Date.parse(x.iso) / 1000)) ?? 0) + 1);
+  const days = [...byDayMap].sort((a, b) => a[0].localeCompare(b[0]));
+  return {
+    ok: true as const, importedTotal, withActivity: found.length, noActivity: importedTotal - found.length, alreadyDated: found.length - eligible.length,
+    updated: p.dryRun ? 0 : updated, wouldUpdate: plan.length, earliest: days[0]?.[0] ?? null, latest: days.at(-1)?.[0] ?? null,
+    byDay: days.map(([day, n]) => ({ day, n })), complete, dryRun: p.dryRun,
+  };
+}

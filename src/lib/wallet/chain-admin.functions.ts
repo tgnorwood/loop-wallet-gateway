@@ -246,3 +246,13 @@ export const adminNewWallets = createServerFn({ method: "POST" })
       })),
     };
   });
+
+export const adminEstimateWalletDates = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: { dryRun: boolean }) => z.object({ dryRun: z.boolean() }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.supabase, context.userId);
+    const mig = await import("./migrate.server");
+    try { return await mig.estimateWalletDates({ dryRun: data.dryRun, actor: context.userId }); }
+    catch (e) { return { ok: false as const, error: (e as Error).message }; }
+  });
