@@ -118,7 +118,7 @@ function Apps({ apps }: { apps: AppRow[] }) {
             <div className="min-w-48 flex-1">
               <p className="font-medium">{a.name} {a.sandbox && <span className="text-xs text-muted-foreground">(sandbox)</span>} {a.revoked_at && <span className="text-xs text-destructive">revoked</span>}</p>
               <p className="font-mono text-xs text-muted-foreground">{a.id} · {a.key_prefix}…</p>
-              <p className="text-xs text-muted-foreground">{a.allowed_origins.join(", ") || "No websites"}</p>
+              <EditOrigins app={a} disabled={!!a.revoked_at} onSave={async (list) => { await update({ data: { id: a.id, allowed_origins: list } }); refresh(); }} />
             </div>
             {(["popup_enabled", "api_enabled", "trusted_oauth"] as const).map((k) => (
               <label key={k} className="flex items-center gap-2 text-xs">
@@ -170,5 +170,36 @@ function Search() {
         </div>
       )}
     </section>
+  );
+}
+
+/** Shows an app's registered websites with a small editor. Browser sign-in (popup) only works from these exact addresses. */
+function EditOrigins({ app, disabled, onSave }: { app: AppRow; disabled: boolean; onSave: (list: string[]) => Promise<void> }) {
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  if (!editing) {
+    return (
+      <p className="text-xs text-muted-foreground">
+        {app.allowed_origins.join(", ") || "No websites"}
+        {!disabled && <button className="ml-2 underline hover:text-foreground" onClick={() => { setText(app.allowed_origins.join("\n")); setEditing(true); }}>Edit websites</button>}
+      </p>
+    );
+  }
+  async function save() {
+    const list = text.split(/[\s,]+/).filter(Boolean);
+    const bad = list.find((u) => { try { return !["http:", "https:"].includes(new URL(u).protocol); } catch { return true; } });
+    if (bad) { toast.error(`"${bad}" is not a web address (use the full form, e.g. https://loop.do)`); return; }
+    setBusy(true);
+    try { await onSave(list); toast.success("Websites saved"); setEditing(false); }
+    catch (e) { toast.error((e as Error).message); }
+    finally { setBusy(false); }
+  }
+  return (
+    <div className="mt-1 space-y-2">
+      <textarea className="h-20 w-full rounded-md border bg-background p-2 font-mono text-xs" value={text} onChange={(e) => setText(e.target.value)} placeholder="One per line, e.g. https://loop.do" />
+      <p className="text-xs text-muted-foreground">Each address must match exactly. https://loop.do and https://www.loop.do are different, so add both if you use both.</p>
+      <div className="flex gap-2"><Button size="sm" disabled={busy} onClick={save}>Save</Button><Button size="sm" variant="outline" disabled={busy} onClick={() => setEditing(false)}>Cancel</Button></div>
+    </div>
   );
 }
