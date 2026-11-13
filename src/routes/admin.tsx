@@ -11,7 +11,7 @@ import { loopPreviewMeta } from "@/lib/branding";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
-import { useAuth } from "@/hooks/use-auth";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { adminCreateApp, adminOverview, adminRevokeSessions, adminSearch, adminUpdateApp } from "@/lib/wallet/portal.functions";
 
 export const Route = createFileRoute("/admin")({
@@ -28,30 +28,50 @@ export const Route = createFileRoute("/admin")({
 });
 
 function AdminPage() {
+  const tab = "rounded-md px-4 py-1.5 text-sm";
   return (
     <div className="min-h-screen">
       <AppHeader />
       <AdminOnly>
         <div className="mx-auto max-w-6xl px-4 pt-6"><IssuesBanner /></div>
-        <Admin />
-        <div id="admin-console" className="mt-6 border-t">
-          <div className="mx-auto max-w-6xl px-4 pt-8"><h2 className="text-xl font-semibold">Admin console</h2><p className="text-sm text-muted-foreground">Transactions, new wallets, tokens, collections, imports and security.</p></div>
-          <AdminConsole />
-        </div>
+        <Tabs defaultValue="console" id="admin-tabs">
+          <div className="mx-auto max-w-6xl px-4 pt-6">
+            <TabsList>
+              <TabsTrigger value="console" className={tab}>Console</TabsTrigger>
+              <TabsTrigger value="apps" className={tab}>Partner apps</TabsTrigger>
+              <TabsTrigger value="wallets" className={tab}>Wallets &amp; security</TabsTrigger>
+            </TabsList>
+          </div>
+          <TabsContent value="console"><AdminConsole /></TabsContent>
+          <TabsContent value="apps"><AppsTab /></TabsContent>
+          <TabsContent value="wallets"><WalletsTab /></TabsContent>
+        </Tabs>
       </AdminOnly>
     </div>
   );
 }
 
-function Admin() {
+function useOverview() {
   const overview = useServerFn(adminOverview);
-  const { data, error, isLoading } = useQuery({ queryKey: ["admin"], queryFn: () => overview(), retry: false });
+  return useQuery({ queryKey: ["admin"], queryFn: () => overview(), retry: false });
+}
+
+/** Partner apps: create, edit websites, switches, keys. */
+function AppsTab() {
+  const { data, error, isLoading } = useOverview();
   if (isLoading) return <p className="p-8 text-muted-foreground">Loading…</p>;
-  if (error) return <p className="p-8 text-destructive">Admins only.</p>;
-  const d = data!;
+  if (error || !data) return <p className="p-8 text-destructive">Admins only.</p>;
+  return <main className="mx-auto max-w-6xl space-y-6 px-4 py-6"><Apps apps={data.apps} /></main>;
+}
+
+/** Wallet health numbers, wallet lookup by email or address, and recent takeovers. */
+function WalletsTab() {
+  const { data: d, error, isLoading } = useOverview();
+  if (isLoading) return <p className="p-8 text-muted-foreground">Loading…</p>;
+  if (error || !d) return <p className="p-8 text-destructive">Admins only.</p>;
   const pct = d.totalWallets ? Math.round((d.verifiedWallets / d.totalWallets) * 100) : 0;
   return (
-    <main className="mx-auto max-w-6xl space-y-6 px-4 py-8">
+    <main className="mx-auto max-w-6xl space-y-6 px-4 py-6">
       <div className="grid gap-4 sm:grid-cols-5">
         <Stat label="Total wallets" value={d.totalWallets} />
         <Stat label="Verified" value={`${pct}%`} />
@@ -59,7 +79,6 @@ function Admin() {
         <Stat label="Signatures (7 days)" value={d.signsLast7d} />
         <Stat label="Transactions (7 days)" value={d.txsLast7d} />
       </div>
-      <Apps apps={d.apps} />
       <Search />
       <section className="rounded-xl border bg-card p-5">
         <h2 className="mb-3 font-semibold">Recent takeovers</h2>

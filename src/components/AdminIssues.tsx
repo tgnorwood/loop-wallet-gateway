@@ -23,10 +23,10 @@ export function IssuesBanner() {
   if (error || !data) return null;
   const clear = data.issueCount === 0;
   return (
-    <a href="#admin-console" className={`flex items-center gap-3 rounded-xl border p-4 text-sm transition-colors hover:bg-secondary ${clear ? "border-emerald-500/30 bg-emerald-500/5" : "border-destructive/40 bg-destructive/5"}`}>
+    <a href="#admin-tabs" className={`flex items-center gap-3 rounded-xl border p-4 text-sm transition-colors hover:bg-secondary ${clear ? "border-emerald-500/30 bg-emerald-500/5" : "border-destructive/40 bg-destructive/5"}`}>
       {clear ? <CheckCircle2 className="h-5 w-5 text-emerald-400" /> : <AlertTriangle className="h-5 w-5 text-destructive" />}
       <span className="font-medium">{clear ? "No issues right now" : `${data.issueCount} thing${data.issueCount === 1 ? "" : "s"} need${data.issueCount === 1 ? "s" : ""} attention`}</span>
-      <span className="text-muted-foreground">{clear ? "Transactions, wallets and notifications look healthy." : "Open the Issues tab below."}</span>
+      <span className="text-muted-foreground">{clear ? "Transactions, wallets and notifications look healthy." : "Open the Issues tab in the console."}</span>
       <span className="ml-auto text-xs text-muted-foreground">Updated {new Date(data.asOf).toLocaleTimeString()}</span>
     </a>
   );
