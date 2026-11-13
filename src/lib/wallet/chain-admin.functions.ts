@@ -371,3 +371,63 @@ export const adminCheckOnChain = createServerFn({ method: "POST" })
     const r = await checkOnChain(t);
     return { ok: true as const, result: r.result, message: r.message, txHash: r.txHash ?? null };
   });
+
+// ---------- admin stats page: platform numbers and a breakdown per connected app ----------
+export const adminStats = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await assertAdmin(context.supabase, context.userId);
+    const sb = context.supabase;
+    const ago = (ms: number) => new Date(Date.now() - ms).toISOString();
+    const day = ago(864e5), week = ago(7 * 864e5);
+    const count = async (q: PromiseLike<{ count: number | null }>) => (await q).count ?? 0;
+    const h = <T extends string>(t: T) => sb.from(t as never).select("id", { count: "exact", head: true });
+
+    const { data: apps } = await sb.from("registered_apps").select("id,name,key_prefix,allowed_origins,popup_enabled,api_enabled,trusted_oauth,sandbox,revoked_at,created_at,webhook_url,daily_mint_cap,daily_distribute_cap,rate_limit_per_min,mainnet_enabled").order("created_at");
+
+    const platform = await Promise.all([
+      count(h("wallets").is("retired_at", null)),
+      count(h("wallets").is("retired_at", null).not("email_verified_at", "is", null)),
+      count(h("wallets").is("retired_at", null).eq("deployed", true)),
+      count(h("tokens").eq("is_test", false)),
+      count(h("collections").eq("is_test", false)),
+      count(h("nfts")),
+      count(h("chain_events")),
+      count(h("transactions").eq("status", "confirmed").gte("created_at", day)),
+      count(h("transactions").eq("status", "failed").gte("created_at", day)),
+      count(h("transactions").eq("status", "confirmed").gte("created_at", week)),
+      count(h("transactions").eq("status", "failed").gte("created_at", week)),
+      count(h("transactions").in("status", ["queued", "processing", "submitted", "finalizing"])),
+      count(h("transactions").eq("status", "unknown")),
+      count(h("webhook_deliveries").eq("status", "pending")),
+      count(h("wallets").in("imported_from", ["loop-do", "loop-do-legacy"])),
+      count(h("audit_logs").eq("action", "signed_typed_data").gte("created_at", week)),
+      count(h("audit_logs").eq("action", "reclaimed_by_owner").gte("created_at", week)),
+    ]);
+    const [wallets, verified, deployed, tokens, collections, nfts, transfers, confirmed24, failed24, confirmed7, failed7, inFlight, unknown, hooks, loopDo, signs7, takeovers7] = platform;
+
+    const perApp = await Promise.all((apps ?? []).map(async (a) => {
+      const [w, w24, w7, linked, tk, col, tx7, ok7, bad7, tx24, calls24, last] = await Promise.all([
+        count(h("wallets").is("retired_at", null).eq("app_id", a.id)),
+        count(h("wallets").is("retired_at", null).eq("app_id", a.id).gte("created_at", day)),
+        count(h("wallets").is("retired_at", null).eq("app_id", a.id).gte("created_at", week)),
+        count(h("wallet_app_links").eq("app_id", a.id)),
+        count(h("tokens").eq("app_id", a.id).eq("is_test", false)),
+        count(h("collections").eq("app_id", a.id).eq("is_test", false)),
+        count(h("transactions").eq("app_id", a.id).gte("created_at", week)),
+        count(h("transactions").eq("app_id", a.id).eq("status", "confirmed").gte("created_at", week)),
+        count(h("transactions").eq("app_id", a.id).eq("status", "failed").gte("created_at", week)),
+        count(h("transactions").eq("app_id", a.id).gte("created_at", day)),
+        count(h("audit_logs").eq("app_id", a.id).eq("action", "api_call").gte("created_at", day)),
+        sb.from("transactions").select("created_at").eq("app_id", a.id).order("created_at", { ascending: false }).limit(1).maybeSingle(),
+      ]);
+      return { id: a.id, wallets: w, wallets24h: w24, wallets7d: w7, linkedWallets: linked, tokens: tk, collections: col, tx7d: tx7, confirmed7d: ok7, failed7d: bad7, tx24h: tx24, apiCalls24h: calls24, lastTransactionAt: last.data?.created_at ?? null };
+    }));
+    const m = new Map(perApp.map((p) => [p.id, p]));
+
+    return {
+      asOf: new Date().toISOString(),
+      platform: { wallets, verified, deployed, tokens, collections, nfts, transfers, confirmed24h: confirmed24, failed24h: failed24, confirmed7d: confirmed7, failed7d: failed7, inFlight, unknown, pendingWebhooks: hooks, loopDoImported: loopDo, signatures7d: signs7, takeovers7d: takeovers7 },
+      apps: (apps ?? []).map((a) => ({ ...a, stats: m.get(a.id)! })),
+    };
+  });

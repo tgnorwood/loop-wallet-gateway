@@ -11,8 +11,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PublicDashboard } from "@/components/PublicDashboard";
 import { Resolve } from "@/components/ResolveTx";
 import { IssuesPanel, useIssues } from "@/components/AdminIssues";
+import { WalletLookup } from "@/components/AdminWalletLookup";
 import { fromBaseUnits, publicTransactionStatus } from "@/lib/wallet/chain-rules";
-import { adminEstimateWalletDates, adminImport, adminKeyStatus, adminLinkImportedWallet, adminMarkTest, adminNewWallets, adminResyncToken, adminRotateKeys, adminTokenHistory, adminUpdateAppChain, chainDashboard } from "@/lib/wallet/chain-admin.functions";
+import { adminEstimateWalletDates, adminImport, adminKeyStatus, adminLinkImportedWallet, adminMarkTest, adminNewWallets, adminResyncToken, adminRotateKeys, adminTokenHistory, chainDashboard } from "@/lib/wallet/chain-admin.functions";
 
 /** The home page: public, aggregate numbers only. The admin console lives on the Admin page. */
 export function DashboardPage() {
@@ -26,13 +27,6 @@ export function DashboardPage() {
 
 const short = (a?: string | null) => (a ? `${a.slice(0, 8)}…${a.slice(-6)}` : "pending");
 const voyager = (kind: "tx" | "contract", v: string) => `https://sepolia.voyager.online/${kind}/${v}`;
-const Stat = ({ label, value, hint }: { label: string; value: string | number; hint?: string | undefined }) => (
-  <div className="rounded-xl border bg-card p-4">
-    <p className="text-xs text-muted-foreground">{label}</p>
-    <p className="mt-1 text-2xl font-semibold">{value}</p>
-    {hint && <p className="mt-1 text-xs text-muted-foreground">{hint}</p>}
-  </div>
-);
 
 /** Transactions, wallets log, tokens, collections, apps, imports and security. Shown at the bottom of the Admin page. */
 export function AdminConsole() {
@@ -54,11 +48,6 @@ export function AdminConsole() {
 
   return (
     <main className="mx-auto max-w-6xl space-y-6 px-4 py-8">
-      {data.transactions.some((t) => publicTransactionStatus(t.status, t.error_code) === "unknown") && (
-        <div className="rounded-xl border border-destructive/40 bg-destructive/5 p-4 text-sm">
-          {data.transactions.filter((t) => publicTransactionStatus(t.status, t.error_code) === "unknown").length} transaction(s) have an unknown outcome and are holding up their queue. Open the Activity log and resolve them.
-        </div>
-      )}
       {!data.relayConfigured && (
         <div className="rounded-xl border border-destructive/40 bg-destructive/5 p-4 text-sm">
           The operator relay key is not set yet, so creating tokens, distributing, creating collections and minting will fail until it is added. Wallet transfers and edits work already.
@@ -72,18 +61,6 @@ export function AdminConsole() {
         <label className="flex items-center gap-2 text-sm"><Switch checked={hideTest} onCheckedChange={setHideTest} /> Hide test items</label>
         <a className="ml-auto text-sm text-primary underline" href="https://token-factory-console.pages.dev/dashboard" target="_blank" rel="noreferrer">Full on-chain history ↗</a>
       </div>
-      <div className="grid gap-4 sm:grid-cols-4">
-        <Stat label="Wallets" value={s.wallets} />
-        <Stat label="Tokens" value={s.tokens} />
-        <Stat label="Collections" value={s.collections} />
-        <Stat label="NFTs" value={s.nfts} />
-        <Stat label="In progress" value={s.inFlight} />
-        <Stat label="Operator queue" value={s.operatorQueue} hint={s.operatorQueue ? `about ${Math.ceil(s.operatorWaitSeconds / 60)} min to clear` : "clear"} />
-        <Stat label="Confirmed (24h)" value={s.confirmed24h} />
-        <Stat label="Failed (24h)" value={s.failed24h} hint={s.pendingWebhooks ? `${s.pendingWebhooks} app notifications waiting` : undefined} />
-        <Stat label="Loop Do wallets moved in" value={s.loopDoImported} hint={s.loopDoImported && s.loopDoLastAt ? `${s.loopDoLegacy} old type (not gas-free) · last ${new Date(s.loopDoLastAt).toLocaleString()}` : "not started"} />
-      </div>
-
       <Tabs defaultValue="issues">
         <TabsList className="h-auto flex-wrap justify-start">
           <TabsTrigger value="issues">Issues{issues.data && issues.data.issueCount > 0 ? <span className="ml-1.5 rounded-full bg-destructive px-1.5 text-[10px] text-destructive-foreground">{issues.data.issueCount}</span> : null}</TabsTrigger>
@@ -93,15 +70,16 @@ export function AdminConsole() {
           <TabsTrigger value="swaps">Swaps</TabsTrigger>
           <TabsTrigger value="tokens">Tokens</TabsTrigger>
           <TabsTrigger value="collections">Collections</TabsTrigger>
-          <TabsTrigger value="apps">Apps</TabsTrigger>
           <TabsTrigger value="import">Move wallets in</TabsTrigger>
           <TabsTrigger value="users">Users</TabsTrigger>
+          <TabsTrigger value="lookup">Wallet lookup</TabsTrigger>
           <TabsTrigger value="security">Security</TabsTrigger>
         </TabsList>
 
         <TabsContent value="issues" className="rounded-xl border bg-card p-4"><IssuesPanel tokens={data.tokens} /></TabsContent>
 
         <TabsContent value="users" className="rounded-xl border bg-card p-4"><LinkWallet /></TabsContent>
+        <TabsContent value="lookup"><WalletLookup /></TabsContent>
         <TabsContent value="security" className="rounded-xl border bg-card p-4"><KeyPanel /></TabsContent>
 
         <TabsContent value="log" className="rounded-xl border bg-card p-4">
@@ -150,10 +128,6 @@ export function AdminConsole() {
         </TabsContent>
         <TabsContent value="collections" className="rounded-xl border bg-card p-4">
           <ItemList kind="collection" items={data.collections} appName={appName} />
-        </TabsContent>
-        <TabsContent value="apps" className="space-y-4">
-          {data.apps.map((a) => <AppSettings key={a.id} app={a} />)}
-          {data.apps.length === 0 && <p className="text-sm text-muted-foreground">Create apps on the Admin page first.</p>}
         </TabsContent>
         <TabsContent value="import">
           <EstimateDates />
@@ -249,47 +223,6 @@ function TokenHistory({ tokens }: { tokens: TokRow[] }) {
 }
 
 type AppRow = Awaited<ReturnType<typeof chainDashboard>>["apps"][number];
-function AppSettings({ app }: { app: AppRow }) {
-  const update = useServerFn(adminUpdateAppChain);
-  const qc = useQueryClient();
-  const [hook, setHook] = useState(app.webhook_url ?? "");
-  const [mintCap, setMintCap] = useState(app.daily_mint_cap?.toString() ?? "");
-  const [distCap, setDistCap] = useState(app.daily_distribute_cap?.toString() ?? "");
-  const [rate, setRate] = useState(String(app.rate_limit_per_min));
-  const [shown, setShown] = useState<{ label: string; value: string } | null>(null);
-  const save = async (extra: { rotateWebhookSecret?: boolean; rotateApiKey?: boolean } = {}) => {
-    try {
-      const r = await update({ data: { id: app.id, webhook_url: hook || null, daily_mint_cap: mintCap ? Number(mintCap) : null, daily_distribute_cap: distCap ? Number(distCap) : null, rate_limit_per_min: Number(rate) || 60, ...extra } });
-      if (r.webhookSecret) setShown({ label: "Webhook secret", value: r.webhookSecret });
-      if (r.apiKey) setShown({ label: "New API key (old one stops working now)", value: r.apiKey });
-      toast.success("Saved");
-      qc.invalidateQueries({ queryKey: ["chain-dash"] });
-    } catch (e) { toast.error((e as Error).message); }
-  };
-  return (
-    <section className="space-y-3 rounded-xl border bg-card p-5">
-      <h3 className="font-semibold">{app.name}</h3>
-      <div className="grid gap-3 sm:grid-cols-2">
-        <label className="text-sm">Webhook address<Input value={hook} onChange={(e) => setHook(e.target.value)} placeholder="https://yourapp.com/api/wallet-events" /></label>
-        <label className="text-sm">Requests per minute<Input value={rate} onChange={(e) => setRate(e.target.value)} /></label>
-        <label className="text-sm">Daily mint limit (tokens)<Input value={mintCap} onChange={(e) => setMintCap(e.target.value)} placeholder="no limit" /></label>
-        <label className="text-sm">Daily give-out limit (tokens)<Input value={distCap} onChange={(e) => setDistCap(e.target.value)} placeholder="no limit" /></label>
-      </div>
-      <div className="flex flex-wrap gap-2">
-        <Button size="sm" onClick={() => save()}>Save</Button>
-        <Button size="sm" variant="outline" onClick={() => save({ rotateWebhookSecret: true })}>New webhook secret</Button>
-        <Button size="sm" variant="outline" onClick={() => { if (confirm("Issue a new API key? The current key stops working immediately.")) save({ rotateApiKey: true }); }}>New API key</Button>
-      </div>
-      {shown && (
-        <div className="rounded-md border bg-muted p-3 text-sm">
-          <p className="font-medium">{shown.label} — copy it now, it won't be shown again</p>
-          <code className="break-all">{shown.value}</code>
-        </div>
-      )}
-    </section>
-  );
-}
-
 function Import({ apps }: { apps: AppRow[] }) {
   const run = useServerFn(adminImport);
   const [appId, setAppId] = useState(apps[0]?.id ?? "");
