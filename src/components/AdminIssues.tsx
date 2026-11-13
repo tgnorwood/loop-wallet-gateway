@@ -52,7 +52,7 @@ function TxRow({ t, resolve }: { t: Issues["failed"][number]; resolve?: boolean 
     <div className="grid gap-1 py-2 sm:grid-cols-[150px_1fr_auto]">
       <span className="text-muted-foreground">{when(t.createdAt)}<span className="block text-xs">{ago(t.createdAt)} ago</span></span>
       <span>
-        <span className="font-medium">{t.type}</span> <span className="text-muted-foreground">· {t.app}{t.who ? ` · ${t.who}` : ""}</span>
+        <span className="font-medium">{t.summary}</span> <span className="text-muted-foreground">· {t.app} · {t.type}</span>
         {(t.errorCode || t.errorMessage) && <span className="block break-words text-xs text-destructive">{[t.errorCode, t.errorMessage].filter(Boolean).join(": ")}</span>}
       </span>
       <span className="flex flex-wrap items-center gap-2">

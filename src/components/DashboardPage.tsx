@@ -89,38 +89,28 @@ export function AdminConsole() {
             ))}
           </div>
           {data.transactions.length === 0 && <p className="text-sm text-muted-foreground">No activity yet.</p>}
-          {data.transactions.map((t) => (
-            <div key={t.id} className="grid grid-cols-[1fr_auto] gap-2 border-t py-2 text-sm sm:grid-cols-[140px_160px_1fr_auto]">
-              <span className="text-muted-foreground">{new Date(t.created_at).toLocaleString()}</span>
-              <span className="font-medium">{t.type}</span>
-              <span className="text-muted-foreground">{appName(t.app_id)}{t.error_code ? ` · ${t.error_code}: ${t.error_message ?? ""}` : ""}</span>
-              <span className="flex items-center gap-2">
-                <span className={t.status === "failed" ? "text-destructive" : t.status === "confirmed" ? "text-primary" : "text-muted-foreground"}>{publicTransactionStatus(t.status, t.error_code)}</span>
-                {t.tx_hash && <a className="underline" href={voyager("tx", t.tx_hash)} target="_blank" rel="noreferrer">view</a>}
-                {publicTransactionStatus(t.status, t.error_code) === "unknown" && <Resolve id={t.id} hasHash={!!t.tx_hash} />}
-              </span>
-            </div>
-          ))}
+          {data.transactions.map((t) => <TxLine key={t.id} t={t} app={appName(t.app_id)} />)}
         </TabsContent>
 
         <TabsContent value="wallets" className="rounded-xl border bg-card p-4"><NewWallets appId={appId} appName={appName} /></TabsContent>
 
-        <TabsContent value="transfers">
-          <TokenHistory tokens={data.tokens} />
+        <TabsContent value="transfers" className="space-y-6">
+          <section className="rounded-xl border bg-card p-4">
+            <h3 className="font-semibold">Token moves made through the hub</h3>
+            <p className="mb-2 text-xs text-muted-foreground">Transfers between wallets, tokens given out or returned, minted and created: who, which token, how much, to whom. Latest 100.</p>
+            {data.moves.length === 0 && <p className="text-sm text-muted-foreground">Nothing yet.</p>}
+            {data.moves.map((t) => <TxLine key={t.id} t={t} app={appName(t.app_id)} />)}
+          </section>
+          <section>
+            <h3 className="mb-2 font-semibold">On-chain history by token</h3>
+            <TokenHistory tokens={data.tokens} />
+          </section>
         </TabsContent>
-        <TabsContent value="swaps" className="space-y-3 border-t pt-4">
+        <TabsContent value="swaps" className="rounded-xl border bg-card p-4">
           <h3 className="font-semibold">Swaps</h3>
-          {data.transactions.filter((t) => t.type === "swap").length === 0 && <p className="text-sm text-muted-foreground">No swaps in the current activity results.</p>}
-          {data.transactions.filter((t) => t.type === "swap").map((t) => (
-            <div key={t.id} className="flex flex-wrap items-center gap-3 border-t py-3 text-sm">
-              <span className="text-muted-foreground">{new Date(t.created_at).toLocaleString()}</span>
-              <span className="font-medium">{appName(t.app_id)}</span>
-              <span className="break-all font-mono text-xs text-muted-foreground">{short(t.tx_hash ?? t.id)}</span>
-              <span className={t.status === "failed" ? "text-destructive" : t.status === "confirmed" ? "text-primary" : "text-muted-foreground"}>{publicTransactionStatus(t.status, t.error_code)}</span>
-              {t.tx_hash && <a className="ml-auto underline" href={voyager("tx", t.tx_hash)} target="_blank" rel="noreferrer">View swap ↗</a>}
-              {t.error_message && <p className="w-full break-words text-muted-foreground">{t.error_message}</p>}
-            </div>
-          ))}
+          <p className="mb-2 text-xs text-muted-foreground">Who swapped which token for which, and how much. Latest 100.</p>
+          {data.swaps.length === 0 && <p className="text-sm text-muted-foreground">No swaps yet.</p>}
+          {data.swaps.map((t) => <TxLine key={t.id} t={t} app={appName(t.app_id)} />)}
         </TabsContent>
         <TabsContent value="tokens" className="rounded-xl border bg-card p-4">
           <ItemList kind="token" items={data.tokens} appName={appName} />
@@ -417,5 +407,31 @@ function EstimateDates() {
         </div>
       )}
     </section>
+  );
+}
+
+type TxOut = {
+  id: string; app_id: string; type: string; status: string; tx_hash: string | null; error_code: string | null; error_message: string | null; created_at: string;
+  summary: string; amount: string | null; token: string | null; toToken: string | null; from: string | null; to: string | null;
+};
+
+/** One transaction as a sentence: what was done, by whom, to whom, with a status and a Voyager link. */
+function TxLine({ t, app }: { t: TxOut; app: string }) {
+  const st = publicTransactionStatus(t.status, t.error_code);
+  const color = st === "failed" ? "text-destructive" : st === "confirmed" ? "text-primary" : st === "unknown" ? "text-amber-400" : "text-muted-foreground";
+  return (
+    <div className="grid gap-1 border-t py-3 text-sm sm:grid-cols-[150px_1fr_auto]">
+      <span className="text-muted-foreground">{new Date(t.created_at).toLocaleString()}</span>
+      <span className="min-w-0">
+        <span className="block break-words font-medium">{t.summary}</span>
+        <span className="block text-xs text-muted-foreground">{app} · {t.type}</span>
+        {t.error_code && <span className="block break-words text-xs text-destructive">{t.error_code}{t.error_message ? `: ${t.error_message}` : ""}</span>}
+      </span>
+      <span className="flex flex-wrap items-center gap-2">
+        <span className={color}>{st}</span>
+        {t.tx_hash && <a className="underline" href={voyager("tx", t.tx_hash)} target="_blank" rel="noreferrer">view ↗</a>}
+        {st === "unknown" && <Resolve id={t.id} hasHash={!!t.tx_hash} />}
+      </span>
+    </div>
   );
 }

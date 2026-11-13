@@ -7,6 +7,45 @@ async function assertAdmin(supabase: unknown, userId: string) {
   if (!data) throw new Error("Forbidden");
 }
 
+// ---------- turning recorded transactions into "what was actually done" ----------
+type DescribeRow = { id: string; type: string; wallet_id?: string | null; request?: unknown; result?: unknown };
+const hexKey = (a: string) => { try { return "0x" + BigInt(a).toString(16); } catch { return a; } };
+const pad64 = (a: string) => { try { return "0x" + BigInt(a).toString(16).padStart(64, "0"); } catch { return a; } };
+
+/** Looks up the token, collection and wallet names these transactions mention, then writes a sentence for each. */
+async function describeRows(sb: { from: (t: never) => any }, rows: DescribeRow[]) {
+  const { describeTx } = await import("./describe-tx");
+  const tokens = new Set<string>(), cols = new Set<string>(), ids = new Set<string>(), addrs = new Set<string>();
+  for (const t of rows) {
+    const r = (((t.request ?? {}) as Record<string, unknown>)["_r"] ?? {}) as Record<string, string | undefined>;
+    for (const k of ["token", "fromToken", "toToken"]) if (r[k]) tokens.add(r[k]!);
+    if (r["collection"]) cols.add(r["collection"]);
+    if (t.wallet_id) ids.add(t.wallet_id);
+    for (const k of ["toWalletId", "ownerWalletId"]) if (r[k]) ids.add(r[k]!);
+    for (const k of ["to", "receiver", "minter", "creator"]) if (r[k]) addrs.add(pad64(r[k]!));
+  }
+  const q = (table: string, cols_: string, col: string, vals: Set<string>) => vals.size ? (sb.from(table as never) as any).select(cols_).in(col, [...vals].slice(0, 400)) : Promise.resolve({ data: [] });
+  const [tk, cl, wi, wa] = await Promise.all([
+    q("tokens", "address,symbol,name", "address", tokens),
+    q("collections", "address,symbol,name", "address", cols),
+    q("wallets", "id,address,email,external_id", "id", ids),
+    q("wallets", "id,address,email,external_id", "address", addrs),
+  ]);
+  const tMap = new Map<string, { symbol: string; name: string }>((tk.data ?? []).map((x: { address: string; symbol: string; name: string }) => [hexKey(x.address), { symbol: x.symbol, name: x.name }]));
+  const cMap = new Map<string, { symbol: string; name: string }>((cl.data ?? []).map((x: { address: string; symbol: string; name: string }) => [hexKey(x.address), { symbol: x.symbol, name: x.name }]));
+  const wMap = new Map<string, string>();
+  for (const w of [...(wi.data ?? []), ...(wa.data ?? [])] as { id: string; address: string; email: string | null; external_id: string | null }[]) {
+    const label = w.email ?? (w.external_id ? `user ${w.external_id.slice(0, 8)}` : null);
+    if (label) { wMap.set(w.id, label); wMap.set(hexKey(w.address), label); }
+  }
+  const lookup = {
+    token: (a: string) => tMap.get(hexKey(a)),
+    collection: (a: string) => cMap.get(hexKey(a)),
+    wallet: (x: string) => wMap.get(x.startsWith("0x") ? hexKey(x) : x),
+  };
+  return new Map(rows.map((t) => [t.id, describeTx({ type: t.type, wallet_id: t.wallet_id ?? null, request: (t.request ?? null) as Record<string, unknown> | null, result: (t.result ?? null) as Record<string, unknown> | null }, lookup)]));
+}
+
 export const chainDashboard = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: { appId?: string | null; status?: string | null; hideTest?: boolean }) =>
@@ -14,15 +53,18 @@ export const chainDashboard = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     await assertAdmin(context.supabase, context.userId);
     const sb = context.supabase;
-    let txq = sb.from("transactions").select("id,app_id,type,status,tx_hash,error_code,error_message,created_at,confirmed_at,network,signer_key").order("created_at", { ascending: false }).limit(100);
-    if (data.appId) txq = txq.eq("app_id", data.appId);
+    const txCols = "id,app_id,type,status,tx_hash,error_code,error_message,created_at,confirmed_at,network,signer_key,wallet_id,request,result";
+    let txq = sb.from("transactions").select(txCols).order("created_at", { ascending: false }).limit(100);
+    let swapQ = sb.from("transactions").select(txCols).eq("type", "swap").order("created_at", { ascending: false }).limit(100);
+    let moveQ = sb.from("transactions").select(txCols).in("type", ["transfer", "token.distribute", "return", "token.mint", "token.create"]).order("created_at", { ascending: false }).limit(100);
+    if (data.appId) { txq = txq.eq("app_id", data.appId); swapQ = swapQ.eq("app_id", data.appId); moveQ = moveQ.eq("app_id", data.appId); }
     if (data.status) txq = txq.eq("status", data.status);
     let tokq = sb.from("tokens").select("id,app_id,name,symbol,address,swappable,is_test,created_at,imported_from,creator_ref,sync_enabled,synced_block,synced_at,sync_error,holder_count,event_count,total_supply").order("created_at", { ascending: false }).limit(200);
     let colq = sb.from("collections").select("id,app_id,name,symbol,address,royalty_bps,frozen,is_test,created_at").order("created_at", { ascending: false }).limit(200);
     if (data.hideTest) { tokq = tokq.eq("is_test", false); colq = colq.eq("is_test", false); }
     if (data.appId) { tokq = tokq.eq("app_id", data.appId); colq = colq.eq("app_id", data.appId); }
     const day = new Date(Date.now() - 864e5).toISOString();
-    const [txs, tokens, cols, nfts, wallets, queued, opQueued, confirmed24, failed24, apps, hooks] = await Promise.all([
+    const [txs, tokens, cols, nfts, wallets, queued, opQueued, confirmed24, failed24, apps, hooks, swapsRes, movesRes] = await Promise.all([
       txq, tokq, colq,
       sb.from("nfts").select("id", { count: "exact", head: true }),
       sb.from("wallets").select("id", { count: "exact", head: true }),
@@ -32,7 +74,16 @@ export const chainDashboard = createServerFn({ method: "POST" })
       sb.from("transactions").select("id", { count: "exact", head: true }).eq("status", "failed").gte("created_at", day),
       sb.from("registered_apps").select("id,name,webhook_url,daily_mint_cap,daily_distribute_cap,rate_limit_per_min,mainnet_enabled,api_enabled").is("revoked_at", null).order("name"),
       sb.from("webhook_deliveries").select("id", { count: "exact", head: true }).eq("status", "pending"),
+      swapQ, moveQ,
     ]);
+    // Say what each one actually did (who, which token, how much, to whom) instead of just its type.
+    type TxRowOut = NonNullable<typeof txs.data>[number];
+    const all = [...(txs.data ?? []), ...(swapsRes.data ?? []), ...(movesRes.data ?? [])] as TxRowOut[];
+    const said = await describeRows(sb as never, all as never).catch(() => new Map());
+    const withSummary = (rows: TxRowOut[] | null) => (rows ?? []).map(({ request: _q, result: _r, ...t }) => {
+      const d = said.get(t.id);
+      return { ...t, summary: d?.summary ?? t.type, amount: d?.amount ?? null, token: d?.token ?? null, toToken: d?.toToken ?? null, from: d?.from ?? null, to: d?.to ?? null };
+    });
     const [ldAll, ldLegacy, ldLast] = await Promise.all([
       sb.from("wallets").select("id", { count: "exact", head: true }).in("imported_from", ["loop-do", "loop-do-legacy"]),
       sb.from("wallets").select("id", { count: "exact", head: true }).eq("imported_from", "loop-do-legacy"),
@@ -46,7 +97,7 @@ export const chainDashboard = createServerFn({ method: "POST" })
         confirmed24h: confirmed24.count ?? 0, failed24h: failed24.count ?? 0, pendingWebhooks: hooks.count ?? 0,
         loopDoImported: ldAll.count ?? 0, loopDoLegacy: ldLegacy.count ?? 0, loopDoLastAt: ldLast.data?.created_at ?? null,
       },
-      transactions: txs.data ?? [], tokens: tokens.data ?? [], collections: cols.data ?? [], apps: apps.data ?? [],
+      transactions: withSummary(txs.data as TxRowOut[] | null), swaps: withSummary(swapsRes.data as TxRowOut[] | null), moves: withSummary(movesRes.data as TxRowOut[] | null), tokens: tokens.data ?? [], collections: cols.data ?? [], apps: apps.data ?? [],
       relayConfigured: !!process.env["RELAY_API_KEY"],
     };
   });
@@ -265,10 +316,10 @@ export const adminIssues = createServerFn({ method: "POST" })
     const sb = context.supabase;
     const ago = (ms: number) => new Date(Date.now() - ms).toISOString();
     const [unknownQ, failedQ, queuedQ, submittedQ, hooksQ, hooksFailedQ, otpQ, legacyQ, errQ, tokQ, appsQ] = await Promise.all([
-      sb.from("transactions").select("id,app_id,type,status,tx_hash,error_code,error_message,created_at,wallet_id,signer_key").or("status.eq.unknown,and(error_code.eq.SUBMISSION_UNKNOWN,status.in.(processing,submitted,finalizing))").limit(50),
-      sb.from("transactions").select("id,app_id,type,status,tx_hash,error_code,error_message,created_at,wallet_id,signer_key").eq("status", "failed").gte("created_at", ago(7 * 864e5)).order("created_at", { ascending: false }).limit(100),
-      sb.from("transactions").select("id,app_id,type,status,created_at,signer_key").eq("status", "queued").lt("created_at", ago(10 * 60_000)).order("created_at").limit(50),
-      sb.from("transactions").select("id,app_id,type,status,tx_hash,created_at,submitted_at,signer_key").eq("status", "submitted").is("error_code", null).lt("submitted_at", ago(5 * 60_000)).order("submitted_at").limit(50),
+      sb.from("transactions").select("id,app_id,type,status,tx_hash,error_code,error_message,created_at,wallet_id,signer_key,request,result").or("status.eq.unknown,and(error_code.eq.SUBMISSION_UNKNOWN,status.in.(processing,submitted,finalizing))").limit(50),
+      sb.from("transactions").select("id,app_id,type,status,tx_hash,error_code,error_message,created_at,wallet_id,signer_key,request,result").eq("status", "failed").gte("created_at", ago(7 * 864e5)).order("created_at", { ascending: false }).limit(100),
+      sb.from("transactions").select("id,app_id,type,status,created_at,signer_key,wallet_id,request,result").eq("status", "queued").lt("created_at", ago(10 * 60_000)).order("created_at").limit(50),
+      sb.from("transactions").select("id,app_id,type,status,tx_hash,created_at,submitted_at,signer_key,wallet_id,request,result").eq("status", "submitted").is("error_code", null).lt("submitted_at", ago(5 * 60_000)).order("submitted_at").limit(50),
       sb.from("webhook_deliveries").select("id,app_id,event,attempts,status,last_error,created_at,transaction_id").eq("status", "pending").gte("attempts", 3).order("created_at").limit(50),
       sb.from("webhook_deliveries").select("id,app_id,event,attempts,status,last_error,created_at,transaction_id").eq("status", "failed").gte("created_at", ago(7 * 864e5)).order("created_at", { ascending: false }).limit(50),
       sb.from("audit_logs").select("wallet_id,created_at").eq("action", "otp_failed").gte("created_at", ago(864e5)).limit(1000),
@@ -288,9 +339,13 @@ export const adminIssues = createServerFn({ method: "POST" })
     const { data: ws } = walletIds.length ? await sb.from("wallets").select("id,email,external_id,address,app_id").in("id", walletIds) : { data: [] as { id: string; email: string | null; external_id: string | null; address: string; app_id: string | null }[] };
     const who = new Map((ws ?? []).map((w) => [w.id, w.email ?? (w.external_id ? `user ${w.external_id}` : w.address)]));
 
+    // A sentence for each transaction mentioned here: what it was actually trying to do.
+    const issueRows = [...(unknownQ.data ?? []), ...(failedQ.data ?? []), ...(queuedQ.data ?? []), ...(submittedQ.data ?? [])] as unknown as DescribeRow[];
+    const said = await describeRows(sb as never, issueRows).catch(() => new Map());
     const tx = (t: { id: string; app_id: string; type: string; status: string; created_at: string; tx_hash?: string | null; error_code?: string | null; error_message?: string | null; wallet_id?: string | null; signer_key?: string }) => ({
       id: t.id, app: an(t.app_id), type: t.type, status: t.status, txHash: t.tx_hash ?? null, errorCode: t.error_code ?? null, errorMessage: t.error_message ?? null,
       createdAt: t.created_at, who: t.wallet_id ? (who.get(t.wallet_id) ?? null) : null, lane: t.signer_key ?? null,
+      summary: (said.get(t.id)?.summary as string | undefined) ?? t.type,
     });
     const failed = (failedQ.data ?? []).map(tx);
     const byCode: Record<string, number> = {};
