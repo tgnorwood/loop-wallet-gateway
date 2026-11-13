@@ -19,6 +19,11 @@ export default defineConfig({
   vite: {
     resolve: {
       alias: {
+        // htmlparser2 needs entities 7.x (`entities/decode`); the bare `entities`
+        // alias below pins 4.5.0 for @react-email/render, so resolve this first.
+        "entities/decode": fileURLToPath(
+          new URL("./node_modules/htmlparser2/node_modules/entities/dist/esm/decode.js", import.meta.url),
+        ),
         "entities/lib/decode.js": entityPath("lib/decode.js"),
         "entities/lib/encode.js": entityPath("lib/encode.js"),
         entities: entityPath(""),
