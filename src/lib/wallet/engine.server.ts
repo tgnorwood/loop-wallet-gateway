@@ -24,7 +24,7 @@ export type TxRow = {
   id: string; app_id: string; network: string; type: string; status: string; idempotency_key: string;
   request: Record<string, unknown>; request_hash: string; result: Record<string, unknown> | null; signer_key: string;
   wallet_id: string | null; tx_hash: string | null; error_code: string | null; error_message: string | null;
-  attempts: number; created_at: string; submitted_at: string | null; confirmed_at: string | null;
+  attempts: number; created_at: string; submitted_at: string | null; confirmed_at: string | null; next_attempt_at?: string | null;
 };
 
 import { isGasFreeClass, LEGACY_CLASS_MESSAGE } from "./chain-rules";
@@ -295,6 +295,55 @@ async function checkSubmitted(t: TxRow) {
   }
 }
 
+export type ChainCheck = { result: "found" | "not_yet" | "not_found" | "unsupported" | "error" | "skipped"; txHash?: string; message: string };
+
+/**
+ * Looks for this transaction on Starknet itself, from what the request was (token, recipient, amount).
+ *  - found: attaches the real hash, and the normal confirmation takes over (passes);
+ *  - not found for over an hour: no signed request can still land, so it did not happen: marked failed;
+ *  - not found yet, or this kind of action cannot be matched: stays unknown.
+ */
+export async function checkOnChain(t: TxRow): Promise<ChainCheck> {
+  if (t.status !== "unknown" || t.tx_hash) return { result: "skipped", message: "This transaction is not waiting on an outcome." };
+  const core = await import("./core/core");
+  const { evidenceSpec, findOnChain, NOT_ON_CHAIN_AFTER_MINUTES } = await import("./chain-evidence.server");
+  let walletAddress: string | null = null;
+  if (t.wallet_id) walletAddress = (await db.from("wallets").select("address").eq("id", t.wallet_id).maybeSingle()).data?.address ?? null;
+  const spec = evidenceSpec({ type: t.type, r: (t.request["_r"] ?? {}) as Record<string, string>, factory: core.cfg(t.network).tokenFactory, walletAddress });
+  if (!spec) return { result: "unsupported", message: `The hub cannot match "${t.type}" on the chain by itself (it has no unique recipient or amount to look for). Check Voyager and use the buttons.` };
+
+  const sinceUnix = Date.parse(t.created_at) / 1000;
+  const { data: owned } = await db.from("transactions").select("tx_hash").not("tx_hash", "is", null).gte("created_at", new Date((sinceUnix - 86_400) * 1000).toISOString()).limit(5000);
+  const claimed = new Set<string>();
+  for (const o of owned ?? []) { try { claimed.add("0x" + BigInt(o.tx_hash!).toString(16)); } catch { /* ignore */ } }
+
+  let hit;
+  try { hit = await findOnChain(spec, sinceUnix, claimed); }
+  catch (e) { return { result: "error", message: `Could not read the chain just now (${(e as Error).message.slice(0, 120)}). Try again in a moment.` }; }
+
+  if (hit.found) {
+    const { data } = await db.from("transactions").update({ status: "submitted", tx_hash: hit.txHash, submitted_at: new Date().toISOString(), error_code: null, error_message: null }).eq("id", t.id).eq("status", "unknown").select("id").maybeSingle();
+    if (!data) return { result: "skipped", message: "It was settled by something else while checking." };
+    await audit({ app_id: t.app_id, wallet_id: t.wallet_id, action: "tx_recovered", details: { transaction_id: t.id, tx_hash: hit.txHash, via: "chain_events" } });
+    return { result: "found", txHash: hit.txHash, message: `Found it on Starknet (block ${hit.block ?? "?"}). It is being confirmed now.` };
+  }
+  const ageMin = (Date.now() - Date.parse(t.created_at)) / 60_000;
+  if (ageMin >= NOT_ON_CHAIN_AFTER_MINUTES) {
+    const { data } = await db.from("transactions").update({ status: "failed", error_code: "NOT_ON_CHAIN", error_message: `No matching transaction appeared on Starknet within ${NOT_ON_CHAIN_AFTER_MINUTES} minutes, so it did not happen.` }).eq("id", t.id).eq("status", "unknown").select("*").maybeSingle();
+    if (data) { await audit({ app_id: t.app_id, wallet_id: t.wallet_id, action: `tx_failed:${t.type}`, details: { transaction_id: t.id, code: "NOT_ON_CHAIN" } }); await queueWebhook(data as unknown as TxRow); }
+    return { result: "not_found", message: `Not on Starknet after ${Math.round(ageMin)} minutes, so it did not happen. Marked failed; the app has been told it can safely try again.` };
+  }
+  return { result: "not_yet", message: `Not on the chain yet. Only ${Math.round(ageMin)} minute(s) have passed, and it could still land, so it is not safe to call it failed. The hub checks again every minute and will decide by itself at ${NOT_ON_CHAIN_AFTER_MINUTES} minutes.` };
+}
+
+/** Same check, run by the worker for unknowns nothing else could settle, at most once a minute per transaction. */
+async function autoCheckChain(t: TxRow, needsHuman: (why: string) => Promise<void>) {
+  if (t.next_attempt_at && Date.parse(t.next_attempt_at) > Date.now()) return;
+  await db.from("transactions").update({ next_attempt_at: new Date(Date.now() + 60_000).toISOString() }).eq("id", t.id).eq("status", "unknown");
+  const r = await checkOnChain(t);
+  if (r.result === "unsupported" || r.result === "error") await needsHuman(r.message);
+}
+
 /**
  * Works out what happened to a transaction whose outcome was lost, and fixes it without a human whenever it can:
  *  - it has a hash: wait for its receipt;
@@ -307,7 +356,7 @@ async function reconcileUnknown(t: TxRow) {
   const ageMin = (Date.now() - Date.parse(t.created_at)) / 60_000;
   const needsHuman = async (why: string) => { if (ageMin > 10) await alertAdmins("unknown", `Transaction ${t.type} needs a decision`, `Transaction ${t.id} (${t.type}) has an unknown outcome and the hub could not settle it itself: ${why}. Open Admin > Issues.`); };
   if (t.tx_hash) { await checkSubmitted(t); return; }
-  if (!t.signer_key.startsWith("operator:")) { await needsHuman("it was signed from a user's wallet, which has no request log to ask"); return; }
+  if (!t.signer_key.startsWith("operator:")) { await autoCheckChain(t, needsHuman); return; } // wallet-signed: no relay log, so look on the chain
   let lookup;
   try { lookup = await core.relayLookup(t.network, t.id); } catch { return; } // relay unreachable: try again next pass
   const d = reconcileDecision({ createdAt: t.created_at, attempts: t.attempts, lookup });
@@ -321,7 +370,7 @@ async function reconcileUnknown(t: TxRow) {
   } else if (d.action === "requeue") {
     const { data } = await db.from("transactions").update({ status: "queued", started_at: null, error_code: null, error_message: null, next_attempt_at: null }).eq("id", t.id).eq("status", "unknown").select("id").maybeSingle();
     if (data) await audit({ app_id: t.app_id, action: "tx_requeued", details: { transaction_id: t.id, reason: "relay confirmed it never started this request" } });
-  } else await needsHuman(d.reason);
+  } else await autoCheckChain(t, needsHuman); // the relay's log cannot settle it (sent before it existed): look on the chain
 }
 
 /** One worker pass: confirm submitted txs, recover stale claims, submit next per signer, deliver webhooks. */

@@ -358,3 +358,16 @@ export const adminTxStatus = createServerFn({ method: "POST" })
     if (!t.data) return { ok: false as const, error: "not found" };
     return { ok: true as const, status: t.data.status, errorCode: t.data.error_code, errorMessage: t.data.error_message, txHash: t.data.tx_hash, attempts: t.data.attempts, recovered: (rec.count ?? 0) > 0, createdAt: t.data.created_at };
   });
+
+/** The "Check on chain" button: looks for the transaction on Starknet and settles it (passes) or reports why not. */
+export const adminCheckOnChain = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: { id: string }) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.supabase, context.userId);
+    const { getTx, checkOnChain } = await import("./engine.server");
+    const t = await getTx(data.id);
+    if (!t) return { ok: false as const, error: "Transaction not found." };
+    const r = await checkOnChain(t);
+    return { ok: true as const, result: r.result, message: r.message, txHash: r.txHash ?? null };
+  });
