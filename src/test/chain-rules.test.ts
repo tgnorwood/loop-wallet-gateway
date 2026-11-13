@@ -13,6 +13,25 @@ describe("amounts are decimal strings with 18 decimals", () => {
     expect(() => toBaseUnits(5.5 as unknown as string)).toThrow();
     expect(() => toBaseUnits("1.0000000000000000001")).toThrow();
   });
+  it("formats the dashboard's 2.5e+21 base units as 2500 tokens", () => {
+    expect(fromBaseUnits("2.5e+21")).toBe("2500");
+  });
+  it("preserves every digit in scientific notation without floating-point rounding", () => {
+    expect(fromBaseUnits("2.500000000000000000001e+21")).toBe("2500.000000000000000001");
+    expect(fromBaseUnits("2.5E21", 6)).toBe("2500000000000000");
+    expect(fromBaseUnits("100e-2", 0)).toBe("1");
+  });
+  it("rejects fractional base units and unbounded exponents", () => {
+    expect(() => fromBaseUnits("2.5e-1")).toThrow("base units must be an integer");
+    expect(() => fromBaseUnits("1e1000000")).toThrow("base-unit exponent is out of range");
+    expect(() => fromBaseUnits("not an amount")).toThrow();
+  });
+  it("keeps integer, hex, bigint, zero, and signed amounts working", () => {
+    expect(fromBaseUnits("0")).toBe("0");
+    expect(fromBaseUnits(12500000000000000000n)).toBe("12.5");
+    expect(fromBaseUnits("0xde0b6b3a7640000")).toBe("1");
+    expect(fromBaseUnits("-5e17")).toBe("-0.5");
+  });
 });
 
 describe("idempotency", () => {

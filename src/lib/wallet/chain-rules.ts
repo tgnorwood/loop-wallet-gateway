@@ -10,10 +10,27 @@ export function toBaseUnits(value: unknown, decimals = 18): bigint {
 }
 
 export function fromBaseUnits(raw: string | bigint, decimals = 18) {
-  const v = BigInt(raw);
+  // JSON numeric columns can arrive as exponent strings (e.g. "2.5e+21").
+  // Expand with integer arithmetic, never Number(), to preserve every digit.
+  let v: bigint;
+  const scientific = typeof raw === "string" ? /^([+-]?)(\d+)(?:\.(\d+))?[eE]([+-]?\d+)$/.exec(raw.trim()) : null;
+  if (scientific) {
+    const [, sign, whole = "0", fraction = "", exponent = "0"] = scientific;
+    const shift = BigInt(exponent) - BigInt(fraction.length);
+    if (shift > 1000n || shift < -1000n) throw new Error("base-unit exponent is out of range");
+    const digits = BigInt(whole + fraction);
+    if (shift >= 0n) v = digits * 10n ** shift;
+    else {
+      const divisor = 10n ** -shift;
+      if (digits % divisor !== 0n) throw new Error("base units must be an integer");
+      v = digits / divisor;
+    }
+    if (sign === "-") v = -v;
+  } else v = BigInt(raw);
   const base = 10n ** BigInt(decimals);
-  const frac = (v % base).toString().padStart(decimals, "0").replace(/0+$/, "");
-  return `${v / base}${frac ? "." + frac : ""}`;
+  const magnitude = v < 0n ? -v : v;
+  const frac = (magnitude % base).toString().padStart(decimals, "0").replace(/0+$/, "");
+  return `${v < 0n ? "-" : ""}${magnitude / base}${frac ? "." + frac : ""}`;
 }
 
 export const signerKeyOperator = (network: string) => `operator:${network}`;
