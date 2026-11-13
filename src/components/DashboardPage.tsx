@@ -99,14 +99,14 @@ export function AdminConsole() {
           <TabsTrigger value="security">Security</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="issues" className="rounded-xl border bg-card p-4"><IssuesPanel /></TabsContent>
+        <TabsContent value="issues" className="rounded-xl border bg-card p-4"><IssuesPanel tokens={data.tokens} /></TabsContent>
 
         <TabsContent value="users" className="rounded-xl border bg-card p-4"><LinkWallet /></TabsContent>
         <TabsContent value="security" className="rounded-xl border bg-card p-4"><KeyPanel /></TabsContent>
 
         <TabsContent value="log" className="rounded-xl border bg-card p-4">
           <div className="mb-3 flex gap-2 text-sm">
-            {["", "queued", "submitted", "confirmed", "failed"].map((st) => (
+            {["", "queued", "submitted", "unknown", "confirmed", "failed"].map((st) => (
               <Button key={st} size="sm" variant={status === st ? "default" : "outline"} onClick={() => setStatus(st)}>{st || "all"}</Button>
             ))}
           </div>

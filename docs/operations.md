@@ -30,10 +30,26 @@ Each rewrite is verified by decrypting it again, and wallets can be re-run safel
 
 ## A transaction shows "unknown"
 
-It is holding up its lane on purpose (the gateway never resends on its own). Dashboard → Activity log → find it on Voyager:
-- on chain → **Found on chain** and paste the hash (it then completes normally);
-- not on chain → **Didn't happen** (marks failed, app is notified);
-- never reached the relay and no hash → **Send again** (only if you are sure).
+It means the hub sent it but lost the reply, so it does not know the outcome. **This no longer blocks anything:** the
+transaction leaves its queue lane at once and everything behind it keeps moving, and the hub never resends on its own
+guess.
+
+For operator actions (create token, mint, distribute, collections, NFT mints) the hub settles it by itself within a
+minute: every request carries an id that the relay records *before* sending. The hub asks the relay's log what
+happened to that id and either attaches the real transaction hash, marks it failed if the relay refused it, or
+resends only when the log proves the relay never started it.
+
+What stays "unknown" until you act:
+- **Wallet-signed actions** (a user's wallet sending, swapping, moving an NFT): there is no log to ask. You are emailed (`ALERT_EMAIL`).
+- **Anything from before 13 Nov 2026**, when the relay started keeping its log.
+
+For those, open Admin > Issues, look the transaction up on Voyager:
+- on chain: **Found on chain** and paste the hash;
+- not on chain: **Didn't happen** (marks failed, the app is notified);
+- never reached the relay and no hash: **Send again** (only if you are sure).
+
+**Test it:** Admin > Issues > "Test automatic recovery". It sends 1 tiny unit of a token to a dead address and drops the
+reply on purpose. PASSED means the hub found the transaction again with nobody clicking anything.
 
 ## Paymaster proxy lock (Cloudflare Pages `token-factory-console`)
 

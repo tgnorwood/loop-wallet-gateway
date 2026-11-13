@@ -265,7 +265,7 @@ export const adminIssues = createServerFn({ method: "POST" })
     const sb = context.supabase;
     const ago = (ms: number) => new Date(Date.now() - ms).toISOString();
     const [unknownQ, failedQ, queuedQ, submittedQ, hooksQ, hooksFailedQ, otpQ, legacyQ, errQ, tokQ, appsQ] = await Promise.all([
-      sb.from("transactions").select("id,app_id,type,status,tx_hash,error_code,error_message,created_at,wallet_id,signer_key").eq("error_code", "SUBMISSION_UNKNOWN").in("status", ["processing", "submitted", "finalizing"]).limit(50),
+      sb.from("transactions").select("id,app_id,type,status,tx_hash,error_code,error_message,created_at,wallet_id,signer_key").or("status.eq.unknown,and(error_code.eq.SUBMISSION_UNKNOWN,status.in.(processing,submitted,finalizing))").limit(50),
       sb.from("transactions").select("id,app_id,type,status,tx_hash,error_code,error_message,created_at,wallet_id,signer_key").eq("status", "failed").gte("created_at", ago(7 * 864e5)).order("created_at", { ascending: false }).limit(100),
       sb.from("transactions").select("id,app_id,type,status,created_at,signer_key").eq("status", "queued").lt("created_at", ago(10 * 60_000)).order("created_at").limit(50),
       sb.from("transactions").select("id,app_id,type,status,tx_hash,created_at,submitted_at,signer_key").eq("status", "submitted").is("error_code", null).lt("submitted_at", ago(5 * 60_000)).order("submitted_at").limit(50),
@@ -317,4 +317,44 @@ export const adminIssues = createServerFn({ method: "POST" })
     };
     const issueCount = result.unknown.length + result.stuckQueued.length + result.stuckSubmitted.length + result.failedLast24h + result.webhooks.length + result.apiErrors.length + result.wrongCodes.length + result.tokenSyncErrors.length + result.legacyCalls.length;
     return { ...result, issueCount, asOf: new Date().toISOString() };
+  });
+
+// ---------- self-test of automatic recovery ----------
+const DEAD = "0x000000000000000000000000000000000000000000000000000000000000dead";
+
+/** Sends 1 base unit of a token through the relay and deliberately drops the reply, to prove the hub recovers it on its own. */
+export const adminSelfTest = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: { tokenId: string }) => z.object({ tokenId: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.supabase, context.userId);
+    const { supabaseAdmin: db } = await import("@/integrations/supabase/client.server");
+    const { data: tok } = await db.from("tokens").select("id,app_id,network,address,name,symbol").eq("id", data.tokenId).maybeSingle();
+    if (!tok?.address) return { ok: false as const, error: "That token has no address yet." };
+    const { enqueue } = await import("./engine.server");
+    const { laneKey } = await import("./rules");
+    try {
+      const q = await enqueue({
+        appId: tok.app_id, network: tok.network, type: "token.distribute", idempotencyKey: `selftest-${crypto.randomUUID()}`, signerKey: laneKey(tok.network, 0),
+        request: { tokenId: tok.id, amount: "0.000000000000000001", toAddress: DEAD, _test: "drop_reply" },
+        resolved: { token: tok.address, amountRaw: "1", to: DEAD, toWalletId: "" },
+      });
+      const svc = await import("./service.server");
+      await svc.audit({ app_id: tok.app_id, action: "self_test_started", details: { transaction_id: q.tx.id, token: tok.symbol, admin: context.userId } });
+      return { ok: true as const, id: q.tx.id, token: `${tok.name} (${tok.symbol})` };
+    } catch (e) { return { ok: false as const, error: (e as Error).message }; }
+  });
+
+export const adminTxStatus = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: { id: string }) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.supabase, context.userId);
+    const sb = context.supabase;
+    const [t, rec] = await Promise.all([
+      sb.from("transactions").select("status,error_code,error_message,tx_hash,attempts,created_at").eq("id", data.id).maybeSingle(),
+      sb.from("audit_logs").select("id", { count: "exact", head: true }).eq("action", "tx_recovered").eq("details->>transaction_id", data.id),
+    ]);
+    if (!t.data) return { ok: false as const, error: "not found" };
+    return { ok: true as const, status: t.data.status, errorCode: t.data.error_code, errorMessage: t.data.error_message, txHash: t.data.tx_hash, attempts: t.data.attempts, recovered: (rec.count ?? 0) > 0, createdAt: t.data.created_at };
   });

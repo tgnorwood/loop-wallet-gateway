@@ -162,7 +162,7 @@ export async function relay(network: string, action: string, body: Record<string
   const key = process.env["RELAY_API_KEY"];
   if (!key) throw Object.assign(new Error("RELAY_API_KEY is not configured"), { code: "RELAY_NOT_CONFIGURED" });
   const c = cfg(network);
-  const full: Record<string, unknown> = { network, sponsorGas: true, ...body, wait: false };
+  const full: Record<string, unknown> = { network, sponsorGas: true, ...body, wait: false, ...(requestId ? { requestId } : {}) };
   if (action.startsWith("nft/create-collection")) full["factoryAddress"] = c.nftFactory;
   else if (!action.startsWith("nft/")) full["factoryAddress"] = c.tokenFactory;
   const started = Date.now();
@@ -181,8 +181,12 @@ export async function relay(network: string, action: string, body: Record<string
   try { data = JSON.parse(txt); } catch { /* non-JSON */ }
   if (!res.ok || !data["ok"]) {
     const e = Object.assign(new Error(String(data["error"] ?? `relay ${action} failed (${res.status})`)), { status: res.status });
+    // The relay says plainly that nothing was sent: safe to try again, which the recovery pass does.
+    if (data["notSent"] === true || data["inProgress"] === true) throw Object.assign(e, { code: "SUBMISSION_UNKNOWN" });
     if (res.status >= 500 || res.ok && !data["ok"]) throw Object.assign(e, { code: "SUBMISSION_UNKNOWN" });
-    throw readableError(e);
+    // 4xx: the relay refused it before sending anything. A definite failure, not an unknown.
+    const re = readableError(e);
+    throw Object.assign(re, { code: (re as { code?: string }).code ?? "REJECTED" });
   }
   const txHash = data["transactionHash"] ?? data["txHash"] ?? data["transaction_hash"];
   if (typeof txHash !== "string" || !/^0x[0-9a-f]+$/i.test(txHash)) throw Object.assign(new Error("Relay reply has no valid transaction hash; check the chain before retrying"), { code: "SUBMISSION_UNKNOWN" });
@@ -213,4 +217,19 @@ export function mintedTokenId(events: { from_address: string; keys: string[] }[]
     }
   }
   return null;
+}
+
+/** Asks the relay what became of an earlier request (by the requestId we sent). */
+export async function relayLookup(_network: string, requestId: string) {
+  const key = process.env["RELAY_API_KEY"];
+  if (!key) throw Object.assign(new Error("RELAY_API_KEY is not configured"), { code: "RELAY_NOT_CONFIGURED" });
+  const res = await fetch(`${BASE_URL}/api/relay/lookup`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-relay-api-key": key },
+    body: JSON.stringify({ requestId }),
+    signal: AbortSignal.timeout(10_000),
+  });
+  const data = (await res.json().catch(() => ({}))) as { ok?: boolean; found?: boolean; status?: string; transactionHash?: string | null; error?: string | null; definite?: boolean; ageSeconds?: number; trackingSince?: string };
+  if (!res.ok || !data.ok) throw new Error(`relay lookup failed (${res.status})`);
+  return { found: !!data.found, ...(data.status ? { status: data.status } : {}), transactionHash: data.transactionHash ?? null, error: data.error ?? null, definite: !!data.definite, ageSeconds: data.ageSeconds ?? 0, ...(data.trackingSince ? { trackingSince: data.trackingSince } : {}) };
 }

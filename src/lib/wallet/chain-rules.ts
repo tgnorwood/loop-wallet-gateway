@@ -102,6 +102,7 @@ export function submissionNeedsReconciliation(code: string | undefined, retryabl
 
 export function publicTransactionStatus(status: string, errorCode: string | null) {
   if ((status === "processing" || status === "submitted") && errorCode === "SUBMISSION_UNKNOWN") return "unknown";
+  if (status === "unknown") return "unknown";
   if (status === "finalizing") return "submitted";
   return status === "processing" ? "queued" : status;
 }
@@ -141,4 +142,30 @@ export function balancesFromTransfers(evts: Pick<TransferEvt, "from_address" | "
   }
   for (const [k, v] of m) if (v <= 0n) m.delete(k);
   return m;
+}
+
+
+// ---- Recovering a request whose reply was lost ----
+export type RelayLookup = { found: boolean; status?: string; transactionHash?: string | null; error?: string | null; definite?: boolean; ageSeconds?: number; trackingSince?: string };
+export type ReconcileDecision =
+  | { action: "attach"; txHash: string }
+  | { action: "fail"; message: string }
+  | { action: "requeue" }
+  | { action: "wait"; reason: string };
+
+/**
+ * What to do with an operator transaction whose outcome we lost, given what the relay's request log says.
+ * Only ever resends when the relay proves it never started the request; otherwise it follows the real transaction.
+ */
+export function reconcileDecision(p: { createdAt: string; attempts: number; lookup: RelayLookup }): ReconcileDecision {
+  const l = p.lookup;
+  if (l.found) {
+    if (l.status === "submitted" && l.transactionHash) return { action: "attach", txHash: l.transactionHash };
+    if (l.status === "failed") return { action: "fail", message: l.error ?? "rejected before it was sent" };
+    return { action: "wait", reason: "the relay is still working on it or did not finish recording it" };
+  }
+  // Not in the relay's log. That only proves "never sent" for requests made after the log existed.
+  if (!l.trackingSince || Date.parse(p.createdAt) < Date.parse(l.trackingSince)) return { action: "wait", reason: "sent before request tracking existed; check the chain" };
+  if (p.attempts >= MAX_RETRIES) return { action: "wait", reason: "retried several times already" };
+  return { action: "requeue" };
 }

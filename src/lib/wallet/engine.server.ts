@@ -14,6 +14,7 @@ import {
   stableJson,
   submissionNeedsReconciliation,
   publicTransactionStatus,
+  reconcileDecision,
   webhookBackoffMs,
 } from "./chain-rules";
 
@@ -120,6 +121,8 @@ async function execute(t: TxRow) {
         break;
       default: throw new Error(`unknown operator action ${t.type}`);
     }
+    // Admin self-test: act as if the reply never arrived. The relay really sent it and recorded it, so the recovery pass must find it.
+    if (t.request["_test"] === "drop_reply" && t.attempts <= 1) throw Object.assign(new Error("self-test: the reply was dropped on purpose"), { code: "SUBMISSION_UNKNOWN" });
     txHash = (out["transactionHash"] ?? out["txHash"] ?? null) as string | null;
     result = { relay: { tokenAddress: out["tokenAddress"] ?? out["token"] ?? null, collectionAddress: out["collectionAddress"] ?? null, tokenId: out["tokenId"] ?? null } };
   } else {
@@ -170,6 +173,7 @@ async function fail(t: TxRow, err: unknown) {
   const msg = String((err as Error)?.message ?? err).slice(0, 500);
   let mapped = mapChainError(msg, t.type);
   if ((err as { code?: string })?.code === "VALIDATION") mapped = { code: "VALIDATION", status: 400, retry: false };
+  if ((err as { code?: string })?.code === "REJECTED") mapped = { code: "REJECTED", status: 422, retry: false };
   if (t.type === "swap" && mapped.code === "INSUFFICIENT_BALANCE_OR_LIQUIDITY") {
     try {
       const core = await import("./core/core");
@@ -179,9 +183,9 @@ async function fail(t: TxRow, err: unknown) {
     } catch { mapped = { ...mapped, code: "INSUFFICIENT_BALANCE" }; }
   }
   if (submissionNeedsReconciliation((err as { code?: string })?.code, mapped.retry)) {
-    await db.from("transactions").update({ error_code: "SUBMISSION_UNKNOWN", error_message: "Submission outcome unknown; check the chain before retrying. " + msg }).eq("id", t.id);
+    // "unknown" is its own status: it no longer holds the signer's queue, and the recovery pass works on it.
+    await db.from("transactions").update({ status: "unknown", error_code: "SUBMISSION_UNKNOWN", error_message: "Outcome not yet known; the hub is checking. " + msg }).eq("id", t.id);
     await audit({ app_id: t.app_id, wallet_id: t.wallet_id, action: "tx_submission_unknown", details: { transaction_id: t.id, error: msg } });
-    await alertAdmins("unknown", `Transaction ${t.type} needs a decision`, `Transaction ${t.id} (${t.type}) was handed to the chain but the reply was lost, so its signer lane (${t.signer_key}) is paused until you resolve it on the dashboard.\n\nError: ${msg}`);
     return;
   }
   const { data } = await db.from("transactions").update({ status: "failed", error_code: mapped.code, error_message: msg }).eq("id", t.id).select("*").single();
@@ -267,14 +271,14 @@ async function checkSubmitted(t: TxRow) {
   if (!t.tx_hash) return;
   const rec = await core.receiptStatus(t.network, t.tx_hash);
   if (!rec) {
-    if (Date.now() - new Date(t.submitted_at ?? t.created_at).getTime() > 15 * 60_000) {
-      await db.from("transactions").update({ error_code: "SUBMISSION_UNKNOWN", error_message: "Receipt not available yet; continuing chain checks. Do not resend." }).eq("id", t.id);
+    if (t.status === "submitted" && Date.now() - new Date(t.submitted_at ?? t.created_at).getTime() > 15 * 60_000) {
+      await db.from("transactions").update({ status: "unknown", error_code: "SUBMISSION_UNKNOWN", error_message: "No receipt after 15 minutes; still checking the chain. Do not resend." }).eq("id", t.id).eq("status", "submitted");
     }
     return;
   }
   // Many workers can see the same receipt at once (every API call runs one). Exactly one wins this update and
   // applies the effects; the rest stop here, so nothing is recorded or sent twice.
-  const { data: locked } = await db.from("transactions").update({ status: "finalizing", next_attempt_at: new Date().toISOString() }).eq("id", t.id).eq("status", "submitted").select("*").maybeSingle();
+  const { data: locked } = await db.from("transactions").update({ status: "finalizing", next_attempt_at: new Date().toISOString() }).eq("id", t.id).eq("status", t.status).select("*").maybeSingle();
   if (!locked) return;
   const mine = locked as unknown as TxRow;
   try {
@@ -286,9 +290,38 @@ async function checkSubmitted(t: TxRow) {
     }
     await finalize(mine, rec.events);
   } catch (e) {
-    await db.from("transactions").update({ status: "submitted" }).eq("id", mine.id).eq("status", "finalizing"); // try again next pass
+    await db.from("transactions").update({ status: t.status }).eq("id", mine.id).eq("status", "finalizing"); // try again next pass
     throw e;
   }
+}
+
+/**
+ * Works out what happened to a transaction whose outcome was lost, and fixes it without a human whenever it can:
+ *  - it has a hash: wait for its receipt;
+ *  - it went through the relay: ask the relay's request log (attach the hash, mark a definite rejection, or
+ *    resend ONLY if the relay proves it never started it);
+ *  - anything else (wallet-signed, or sent before the log existed) stays "unknown" and the admin is emailed once.
+ */
+async function reconcileUnknown(t: TxRow) {
+  const core = await import("./core/core");
+  const ageMin = (Date.now() - Date.parse(t.created_at)) / 60_000;
+  const needsHuman = async (why: string) => { if (ageMin > 10) await alertAdmins("unknown", `Transaction ${t.type} needs a decision`, `Transaction ${t.id} (${t.type}) has an unknown outcome and the hub could not settle it itself: ${why}. Open Admin > Issues.`); };
+  if (t.tx_hash) { await checkSubmitted(t); return; }
+  if (!t.signer_key.startsWith("operator:")) { await needsHuman("it was signed from a user's wallet, which has no request log to ask"); return; }
+  let lookup;
+  try { lookup = await core.relayLookup(t.network, t.id); } catch { return; } // relay unreachable: try again next pass
+  const d = reconcileDecision({ createdAt: t.created_at, attempts: t.attempts, lookup });
+  if (d.action === "attach") {
+    const { data } = await db.from("transactions").update({ status: "submitted", tx_hash: d.txHash, submitted_at: new Date().toISOString(), error_code: null, error_message: null }).eq("id", t.id).eq("status", "unknown").select("id").maybeSingle();
+    if (data) await audit({ app_id: t.app_id, wallet_id: t.wallet_id, action: "tx_recovered", details: { transaction_id: t.id, tx_hash: d.txHash, via: "relay_log" } });
+  } else if (d.action === "fail") {
+    const m = mapChainError(d.message, t.type);
+    const { data } = await db.from("transactions").update({ status: "failed", error_code: m.code === "CHAIN_ERROR" ? "REJECTED" : m.code, error_message: d.message.slice(0, 500) }).eq("id", t.id).eq("status", "unknown").select("*").maybeSingle();
+    if (data) { await audit({ app_id: t.app_id, action: "tx_failed:" + t.type, details: { transaction_id: t.id, via: "relay_log" } }); await queueWebhook(data as unknown as TxRow); }
+  } else if (d.action === "requeue") {
+    const { data } = await db.from("transactions").update({ status: "queued", started_at: null, error_code: null, error_message: null, next_attempt_at: null }).eq("id", t.id).eq("status", "unknown").select("id").maybeSingle();
+    if (data) await audit({ app_id: t.app_id, action: "tx_requeued", details: { transaction_id: t.id, reason: "relay confirmed it never started this request" } });
+  } else await needsHuman(d.reason);
 }
 
 /** One worker pass: confirm submitted txs, recover stale claims, submit next per signer, deliver webhooks. */
@@ -297,14 +330,19 @@ export async function tick(opts: { maxClaims?: number; budgetMs?: number } = {})
   const budget = opts.budgetMs ?? 20_000;
   const stats = { checked: 0, submitted: 0, failed: 0, webhooks: 0 };
 
-  const { data: lost } = await db.from("transactions").update({ error_code: "SUBMISSION_UNKNOWN", error_message: "Submission response was lost; check the chain before retrying. Do not resend." })
-    .eq("status", "processing").is("tx_hash", null).or("error_code.is.null,error_code.neq.SUBMISSION_UNKNOWN").lt("started_at", new Date(Date.now() - 5 * 60_000).toISOString()).select("id,type,signer_key");
-  for (const l of lost ?? []) await alertAdmins("unknown", `Transaction ${l.type} needs a decision`, `Transaction ${l.id} (${l.type}) has been "processing" for over 5 minutes without a transaction hash, so signer lane ${l.signer_key} is paused until you resolve it on the dashboard.`);
+  // Anything the old rules left "stuck" with an unknown outcome moves to the "unknown" status, which frees its queue lane.
+  await db.from("transactions").update({ status: "unknown" }).in("status", ["processing", "submitted"]).eq("error_code", "SUBMISSION_UNKNOWN");
+  // A worker that claimed a transaction and then died before recording anything: the outcome is unknown, not "still running".
+  await db.from("transactions").update({ status: "unknown", error_code: "SUBMISSION_UNKNOWN", error_message: "The worker stopped before recording a result; the hub is checking." })
+    .eq("status", "processing").is("tx_hash", null).lt("started_at", new Date(Date.now() - 5 * 60_000).toISOString());
   // A worker that died mid-finalize leaves the row "finalizing"; hand it back after two minutes.
   await db.from("transactions").update({ status: "submitted" }).eq("status", "finalizing").lt("next_attempt_at", new Date(Date.now() - 2 * 60_000).toISOString());
 
   const { data: subs } = await db.from("transactions").select("*").eq("status", "submitted").order("submitted_at").limit(25);
   await Promise.allSettled(((subs ?? []) as unknown as TxRow[]).map(async (t) => { stats.checked++; await checkSubmitted(t); }));
+
+  const { data: unk } = await db.from("transactions").select("*").eq("status", "unknown").order("created_at").limit(25);
+  await Promise.allSettled(((unk ?? []) as unknown as TxRow[]).map((t) => reconcileUnknown(t)));
 
   if (Date.now() - started < budget) {
     const { data: claimed } = await db.rpc("claim_transactions", { _max: opts.maxClaims ?? 10 });
@@ -320,7 +358,7 @@ export async function tick(opts: { maxClaims?: number; budgetMs?: number } = {})
 export async function waitForTx(id: string, maxMs = 45_000) {
   const until = Date.now() + maxMs;
   let t = await getTx(id);
-  while (t && !["confirmed", "failed", "cancelled"].includes(t.status) && t.error_code !== "SUBMISSION_UNKNOWN" && Date.now() < until) {
+  while (t && !["confirmed", "failed", "cancelled", "unknown"].includes(t.status) && t.error_code !== "SUBMISSION_UNKNOWN" && Date.now() < until) {
     await new Promise((r) => setTimeout(r, 3000));
     await tick({ maxClaims: 5, budgetMs: 8000 }).catch(() => undefined);
     t = await getTx(id);
@@ -348,7 +386,7 @@ export async function drain(opts: { budgetMs: number; maxClaims?: number; pauseM
 export async function resolveTransaction(id: string, action: "attach_hash" | "mark_failed" | "requeue", opts: { txHash?: string; note?: string }, admin: string) {
   const t = await getTx(id);
   if (!t) throw new EngineError(404, "NOT_FOUND", "transaction not found");
-  if (!["processing", "submitted", "finalizing"].includes(t.status)) throw new EngineError(409, "NOT_RESOLVABLE", `transaction is ${t.status}`);
+  if (!["processing", "submitted", "finalizing", "unknown"].includes(t.status)) throw new EngineError(409, "NOT_RESOLVABLE", `transaction is ${t.status}`);
   let next: Record<string, unknown>;
   if (action === "attach_hash") {
     if (!opts.txHash || !/^0x[0-9a-fA-F]{1,64}$/.test(opts.txHash)) throw new EngineError(400, "VALIDATION", "a transaction hash is required");
