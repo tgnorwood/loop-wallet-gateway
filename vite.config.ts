@@ -8,8 +8,23 @@
 // hosting already compresses at the edge.
 // You can pass additional config via defineConfig({ vite: { ... }, etc... }) if needed.
 import { defineConfig } from "@lovable.dev/vite-tanstack-config";
+import { loadEnv } from "vite";
+import { fileURLToPath } from "node:url";
+
+// Server-only values stay in process.env; never add these to client define values.
+Object.assign(process.env, loadEnv(process.env['NODE_ENV'] ?? "development", process.cwd(), ""));
+const entityPath = (path: string) => fileURLToPath(new URL(`./node_modules/entities/${path}`, import.meta.url));
 
 export default defineConfig({
+  vite: {
+    resolve: {
+      alias: {
+        "entities/lib/decode.js": entityPath("lib/decode.js"),
+        "entities/lib/encode.js": entityPath("lib/encode.js"),
+        entities: entityPath(""),
+      },
+    },
+  },
   tanstackStart: {
     // Redirect TanStack Start's bundled server entry to src/server.ts (our SSR error wrapper).
     // nitro/vite builds from this

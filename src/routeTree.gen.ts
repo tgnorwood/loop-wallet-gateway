@@ -20,6 +20,8 @@ import { Route as WalletRouteImport } from './routes/wallet'
 import { Route as ConnectSignRouteImport } from './routes/connect.sign'
 import { Route as ApiPublicJobsWalletWorkerRouteImport } from './routes/api/public/jobs/wallet-worker'
 import { Route as ApiPublicV1SplatRouteImport } from './routes/api/public/v1/$'
+import { Route as LovableEmailAuthPreviewRouteImport } from './routes/lovable/email/auth/preview'
+import { Route as LovableEmailAuthWebhookRouteImport } from './routes/lovable/email/auth/webhook'
 import { Route as ApiPublicV1OauthTokenRouteImport } from './routes/api/public/v1/oauth/token'
 import { Route as ApiPublicV1WalletExecuteRouteImport } from './routes/api/public/v1/wallet/execute'
 import { Route as ApiPublicV1WalletGetOrCreateRouteImport } from './routes/api/public/v1/wallet/get-or-create'
@@ -84,6 +86,16 @@ const ApiPublicV1SplatRoute = ApiPublicV1SplatRouteImport.update({
   path: '/api/public/v1/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const LovableEmailAuthPreviewRoute = LovableEmailAuthPreviewRouteImport.update({
+  id: '/lovable/email/auth/preview',
+  path: '/lovable/email/auth/preview',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LovableEmailAuthWebhookRoute = LovableEmailAuthWebhookRouteImport.update({
+  id: '/lovable/email/auth/webhook',
+  path: '/lovable/email/auth/webhook',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiPublicV1OauthTokenRoute = ApiPublicV1OauthTokenRouteImport.update({
   id: '/api/public/v1/oauth/token',
   path: '/api/public/v1/oauth/token',
@@ -137,6 +149,8 @@ export interface FileRoutesByFullPath {
   '/connect/sign': typeof ConnectSignRoute
   '/api/public/jobs/wallet-worker': typeof ApiPublicJobsWalletWorkerRoute
   '/api/public/v1/$': typeof ApiPublicV1SplatRoute
+  '/lovable/email/auth/preview': typeof LovableEmailAuthPreviewRoute
+  '/lovable/email/auth/webhook': typeof LovableEmailAuthWebhookRoute
   '/api/public/v1/oauth/token': typeof ApiPublicV1OauthTokenRoute
   '/api/public/v1/wallet/execute': typeof ApiPublicV1WalletExecuteRoute
   '/api/public/v1/wallet/get-or-create': typeof ApiPublicV1WalletGetOrCreateRoute
@@ -157,6 +171,8 @@ export interface FileRoutesByTo {
   '/connect/sign': typeof ConnectSignRoute
   '/api/public/jobs/wallet-worker': typeof ApiPublicJobsWalletWorkerRoute
   '/api/public/v1/$': typeof ApiPublicV1SplatRoute
+  '/lovable/email/auth/preview': typeof LovableEmailAuthPreviewRoute
+  '/lovable/email/auth/webhook': typeof LovableEmailAuthWebhookRoute
   '/api/public/v1/oauth/token': typeof ApiPublicV1OauthTokenRoute
   '/api/public/v1/wallet/execute': typeof ApiPublicV1WalletExecuteRoute
   '/api/public/v1/wallet/get-or-create': typeof ApiPublicV1WalletGetOrCreateRoute
@@ -178,6 +194,8 @@ export interface FileRoutesById {
   '/connect/sign': typeof ConnectSignRoute
   '/api/public/jobs/wallet-worker': typeof ApiPublicJobsWalletWorkerRoute
   '/api/public/v1/$': typeof ApiPublicV1SplatRoute
+  '/lovable/email/auth/preview': typeof LovableEmailAuthPreviewRoute
+  '/lovable/email/auth/webhook': typeof LovableEmailAuthWebhookRoute
   '/api/public/v1/oauth/token': typeof ApiPublicV1OauthTokenRoute
   '/api/public/v1/wallet/execute': typeof ApiPublicV1WalletExecuteRoute
   '/api/public/v1/wallet/get-or-create': typeof ApiPublicV1WalletGetOrCreateRoute
@@ -200,6 +218,8 @@ export interface FileRouteTypes {
     | '/connect/sign'
     | '/api/public/jobs/wallet-worker'
     | '/api/public/v1/$'
+    | '/lovable/email/auth/preview'
+    | '/lovable/email/auth/webhook'
     | '/api/public/v1/oauth/token'
     | '/api/public/v1/wallet/execute'
     | '/api/public/v1/wallet/get-or-create'
@@ -220,6 +240,8 @@ export interface FileRouteTypes {
     | '/connect/sign'
     | '/api/public/jobs/wallet-worker'
     | '/api/public/v1/$'
+    | '/lovable/email/auth/preview'
+    | '/lovable/email/auth/webhook'
     | '/api/public/v1/oauth/token'
     | '/api/public/v1/wallet/execute'
     | '/api/public/v1/wallet/get-or-create'
@@ -240,6 +262,8 @@ export interface FileRouteTypes {
     | '/connect/sign'
     | '/api/public/jobs/wallet-worker'
     | '/api/public/v1/$'
+    | '/lovable/email/auth/preview'
+    | '/lovable/email/auth/webhook'
     | '/api/public/v1/oauth/token'
     | '/api/public/v1/wallet/execute'
     | '/api/public/v1/wallet/get-or-create'
@@ -260,6 +284,8 @@ export interface RootRouteChildren {
   WalletRoute: typeof WalletRoute
   ApiPublicJobsWalletWorkerRoute: typeof ApiPublicJobsWalletWorkerRoute
   ApiPublicV1SplatRoute: typeof ApiPublicV1SplatRoute
+  LovableEmailAuthPreviewRoute: typeof LovableEmailAuthPreviewRoute
+  LovableEmailAuthWebhookRoute: typeof LovableEmailAuthWebhookRoute
   ApiPublicV1OauthTokenRoute: typeof ApiPublicV1OauthTokenRoute
   ApiPublicV1WalletExecuteRoute: typeof ApiPublicV1WalletExecuteRoute
   ApiPublicV1WalletGetOrCreateRoute: typeof ApiPublicV1WalletGetOrCreateRoute
@@ -348,6 +374,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicV1SplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/lovable/email/auth/preview': {
+      id: '/lovable/email/auth/preview'
+      path: '/lovable/email/auth/preview'
+      fullPath: '/lovable/email/auth/preview'
+      preLoaderRoute: typeof LovableEmailAuthPreviewRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/lovable/email/auth/webhook': {
+      id: '/lovable/email/auth/webhook'
+      path: '/lovable/email/auth/webhook'
+      fullPath: '/lovable/email/auth/webhook'
+      preLoaderRoute: typeof LovableEmailAuthWebhookRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/v1/oauth/token': {
       id: '/api/public/v1/oauth/token'
       path: '/api/public/v1/oauth/token'
@@ -422,6 +462,8 @@ const rootRouteChildren: RootRouteChildren = {
   WalletRoute: WalletRoute,
   ApiPublicJobsWalletWorkerRoute: ApiPublicJobsWalletWorkerRoute,
   ApiPublicV1SplatRoute: ApiPublicV1SplatRoute,
+  LovableEmailAuthPreviewRoute: LovableEmailAuthPreviewRoute,
+  LovableEmailAuthWebhookRoute: LovableEmailAuthWebhookRoute,
   ApiPublicV1OauthTokenRoute: ApiPublicV1OauthTokenRoute,
   ApiPublicV1WalletExecuteRoute: ApiPublicV1WalletExecuteRoute,
   ApiPublicV1WalletGetOrCreateRoute: ApiPublicV1WalletGetOrCreateRoute,

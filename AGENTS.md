@@ -38,6 +38,7 @@ use the editor.
 - Partner HTTP API lives under `src/routes/api/public/v1/` and goes through `handle()` in `http.ts` (X-App-Key + registered-origin check); session tokens, app keys and codes are stored only as SHA-256 hashes.
 - Popup sign-in uses an auth code + PKCE exchanged at `/api/public/v1/oauth/token`; replies use postMessage only to the requested origin, which must be registered.
 - OTP email goes through Resend directly (`email.server.ts`, RESEND_API_KEY / RESEND_FROM_ADDRESS); gas-free execution goes through the Token Factory AVNU paymaster proxy (`paymaster.server.ts`, overridable via PAYMASTER_URL), ported from Loop Do.
+- Cloud authentication emails use the scaffolded managed handler and shared inline email theme; wallet proof codes remain on Resend so changing auth branding does not change wallet verification delivery.
 - Central tokens/NFT API is one splat route `src/routes/api/public/v1/$.ts` → `api-v1.server.ts` (Bearer app key, Idempotency-Key on writes); chain calls use `core/core.ts` (port of Token Factory wallet-core, starknet pinned 10.0.2, strings as bytes, amounts as BigInt strings).
 - Every write is a `transactions` row run by `engine.server.ts`: one in-flight tx per signer (unique partial index + `claim_transactions()`), driven by the per-minute `/api/public/jobs/wallet-worker` schedule; operator actions go through the relay (RELAY_API_KEY), wallet actions are signed here and sponsored.
 - Pure API rules (amounts, idempotency, error mapping, caps, minter removal) live in `chain-rules.ts` for unit tests.

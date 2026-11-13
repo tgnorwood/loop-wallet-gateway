@@ -1,5 +1,8 @@
 # Loop Wallet Hub roadmap
 
+- [x] Prepare branded Cloud authentication emails with the correct portal brand link
+- [ ] Activate custom authentication emails — awaiting sender DNS verification and publication
+
 - [x] Lovable Cloud + database schema
 - [x] Starknet wallet core (SNIP-9 class, calldata=[pk], salt=pk)
 - [x] User portal, email+password and Google sign-in, password reset
