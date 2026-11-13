@@ -3,6 +3,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { useState } from "react";
 import { AppHeader } from "@/components/AppHeader";
 import { AdminOnly } from "@/components/AdminOnly";
+import { loopPreviewMeta } from "@/lib/branding";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { sandboxCall } from "@/lib/wallet/portal.functions";
@@ -10,6 +11,7 @@ import { sandboxCall } from "@/lib/wallet/portal.functions";
 export const Route = createFileRoute("/demo")({
   head: () => ({
     meta: [
+      ...loopPreviewMeta,
       { title: "Developer sandbox — Loop Wallet Hub" },
       { name: "description", content: "Try the Loop Wallet partner flow: instant wallets, email codes and takeovers." },
       { property: "og:title", content: "Developer sandbox — Loop Wallet Hub" },

@@ -7,6 +7,7 @@ import { AppHeader } from "@/components/AppHeader";
 import { AdminOnly } from "@/components/AdminOnly";
 import { AdminConsole } from "@/components/DashboardPage";
 import { IssuesBanner } from "@/components/AdminIssues";
+import { loopPreviewMeta } from "@/lib/branding";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
@@ -16,6 +17,7 @@ import { adminCreateApp, adminOverview, adminRevokeSessions, adminSearch, adminU
 export const Route = createFileRoute("/admin")({
   head: () => ({
     meta: [
+      ...loopPreviewMeta,
       { title: "Admin console — Loop Wallet Hub" },
       { name: "description", content: "Manage partner apps, keys, domains and wallet security." },
       { property: "og:title", content: "Admin console — Loop Wallet Hub" },

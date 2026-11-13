@@ -12,10 +12,12 @@ import { fromBaseUnits } from "@/lib/wallet/chain-rules";
 import { useAuth } from "@/hooks/use-auth";
 import { disconnectApp, getPortal, signOutEverywhere } from "@/lib/wallet/portal.functions";
 import { VerifyEmail } from "@/components/VerifyEmail";
+import { loopPreviewMeta } from "@/lib/branding";
 
 export const Route = createFileRoute("/wallet")({
   head: () => ({
     meta: [
+      ...loopPreviewMeta,
       { title: "Your wallet — Loop Wallet Hub" },
       { name: "description", content: "See your Starknet wallet, balances, activity and connected apps." },
       { property: "og:title", content: "Your wallet — Loop Wallet Hub" },

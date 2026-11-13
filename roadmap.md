@@ -1,5 +1,6 @@
 # Loop Wallet Hub roadmap
 
+- [x] Update header, favicon, and social/search previews with the supplied Loop logo
 - [x] Prepare branded Cloud authentication emails with the correct portal brand link
 - [ ] Activate custom authentication emails — awaiting sender DNS verification and publication
 

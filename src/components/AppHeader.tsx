@@ -2,6 +2,7 @@ import { Link } from "@tanstack/react-router";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import { useIsAdmin } from "@/hooks/use-admin";
+import loopLogo from "@/assets/loop-logo.png.asset.json";
 
 export function AppHeader() {
   const { user } = useAuth();
@@ -12,7 +13,7 @@ export function AppHeader() {
     <header className="sticky top-0 z-30 border-b bg-background/80 backdrop-blur">
       <div className="mx-auto flex h-14 max-w-6xl items-center gap-2 px-4 sm:gap-4">
         <Link to="/" className="flex items-center gap-2 whitespace-nowrap font-semibold">
-          <span className="grid h-7 w-7 place-items-center rounded-md bg-gradient-to-br from-[oklch(0.62_0.2_275)] to-[oklch(0.7_0.17_200)] font-mono text-xs text-white">LW</span>
+          <img src={loopLogo.url} alt="Loop" width={40} height={36} className="h-9 w-10 shrink-0 rounded-sm object-contain" />
           <span className="hidden sm:inline">Loop Wallet</span>
         </Link>
         <div className="ml-auto flex items-center gap-1 sm:gap-2">

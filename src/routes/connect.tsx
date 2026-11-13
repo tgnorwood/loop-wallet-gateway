@@ -23,6 +23,8 @@ export const Route = createFileRoute("/connect")({
       { name: "description", content: "Connect your Loop Wallet to a partner app." },
       { property: "og:title", content: "Log in with Loop Wallet" },
       { property: "og:description", content: "Connect your Loop Wallet to a partner app." },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary_large_image" },
     ],
   }),
   component: ConnectLayout,

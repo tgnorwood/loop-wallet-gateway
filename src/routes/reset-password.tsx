@@ -4,10 +4,12 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { loopPreviewMeta } from "@/lib/branding";
 
 export const Route = createFileRoute("/reset-password")({
   head: () => ({
     meta: [
+      ...loopPreviewMeta,
       { title: "Reset password — Loop Wallet Hub" },
       { name: "description", content: "Choose a new password for your Loop Wallet account." },
       { property: "og:title", content: "Reset password — Loop Wallet Hub" },

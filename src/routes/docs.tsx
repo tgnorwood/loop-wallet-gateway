@@ -2,10 +2,12 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { AppHeader } from "@/components/AppHeader";
 import { AdminOnly } from "@/components/AdminOnly";
+import { loopPreviewMeta } from "@/lib/branding";
 
 export const Route = createFileRoute("/docs")({
   head: () => ({
     meta: [
+      ...loopPreviewMeta,
       { title: "Partner docs — Loop Wallet Hub" },
       { name: "description", content: "Add 'Log in with Loop Wallet' or call the partner API." },
       { property: "og:title", content: "Partner docs — Loop Wallet Hub" },

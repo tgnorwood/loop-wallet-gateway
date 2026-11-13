@@ -2,16 +2,16 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { DashboardPage } from "@/components/DashboardPage";
 import { useAuth } from "@/hooks/use-auth";
+import { loopPreviewMeta } from "@/lib/branding";
 
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "Loop Wallet: live activity on Starknet" },
-      { name: "description", content: "Live numbers for Loop's wallets, tokens and NFTs running on Starknet, with gas paid for users." },
-      { property: "og:title", content: "Loop Wallet: live activity on Starknet" },
-      { property: "og:description", content: "Live numbers for Loop's wallets, tokens and NFTs running on Starknet, with gas paid for users." },
-      { property: "og:type", content: "website" },
-      { name: "twitter:card", content: "summary" },
+      { title: "Loop Wallet | Your wallet for Loop apps" },
+      { name: "description", content: "One Loop Wallet for your tokens, NFTs and connected Loop apps. Sign in securely with email or Google and manage your Starknet assets." },
+      { property: "og:title", content: "Loop Wallet | Your wallet for Loop apps" },
+      { property: "og:description", content: "One Loop Wallet for your tokens, NFTs and connected Loop apps. Sign in securely with email or Google and manage your Starknet assets." },
+      ...loopPreviewMeta,
     ],
   }),
   component: Home,

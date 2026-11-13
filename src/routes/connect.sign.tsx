@@ -7,10 +7,12 @@ import { useAuth } from "@/hooks/use-auth";
 import { approveExecute, approveSign } from "@/lib/wallet/portal.functions";
 import { Shell, reply, usePartnerApp } from "@/components/connect-shared";
 import { VerifyEmail } from "@/components/VerifyEmail";
+import { loopPreviewMeta } from "@/lib/branding";
 
 export const Route = createFileRoute("/connect/sign")({
   head: () => ({
     meta: [
+      ...loopPreviewMeta,
       { title: "Approve signature — Loop Wallet" },
       { name: "description", content: "Review and approve a signature request." },
       { property: "og:title", content: "Approve signature — Loop Wallet" },
